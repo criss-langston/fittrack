@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { getWorkouts, getWeightEntries, getPersonalRecords } from "@/lib/db";
-import { Dumbbell, Scale, Trophy, Flame } from "lucide-react";
+import { Dumbbell, Scale, Trophy, Flame, Settings } from "lucide-react";
 import Link from "next/link";
 
 interface Stats {
