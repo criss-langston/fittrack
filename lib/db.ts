@@ -1,5 +1,12 @@
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
 
+export const COMMON_EXERCISES = [
+  "Bench Press","Squat","Deadlift","Overhead Press","Barbell Row",
+  "Pull Up","Lat Pulldown","Leg Press","Romanian Deadlift","Incline Bench Press",
+  "Dumbbell Curl","Tricep Pushdown","Lateral Raise","Cable Fly","Leg Curl",
+  "Leg Extension","Calf Raise","Face Pull","Dips","Lunges",
+];
+
 interface FitTrackDB extends DBSchema {
   workouts: {
     key: string;
@@ -63,27 +70,47 @@ interface FitTrackDB extends DBSchema {
     };
     indexes: { 'by-exercise': string };
   };
+  customExercises: {
+    key: string;
+    value: {
+      id: string;
+      name: string;
+      category: 'machine' | 'cable' | 'barbell' | 'dumbbell' | 'bodyweight' | 'other';
+      muscleGroup: string;
+      notes?: string;
+      createdAt: string;
+    };
+    indexes: { 'by-category': string; 'by-muscle': string };
+  };
 }
 
 let dbPromise: Promise<IDBPDatabase<FitTrackDB>> | null = null;
 
 function getDB() {
   if (!dbPromise) {
-    dbPromise = openDB<FitTrackDB>('fittrack', 1, {
-      upgrade(db) {
-        const workoutStore = db.createObjectStore('workouts', { keyPath: 'id' });
-        workoutStore.createIndex('by-date', 'date');
+    dbPromise = openDB<FitTrackDB>('fittrack', 2, {
+      upgrade(db, oldVersion) {
+        if (oldVersion < 1) {
+          const workoutStore = db.createObjectStore('workouts', { keyPath: 'id' });
+          workoutStore.createIndex('by-date', 'date');
 
-        const weightStore = db.createObjectStore('weightLog', { keyPath: 'id' });
-        weightStore.createIndex('by-date', 'date');
+          const weightStore = db.createObjectStore('weightLog', { keyPath: 'id' });
+          weightStore.createIndex('by-date', 'date');
 
-        const photoStore = db.createObjectStore('photos', { keyPath: 'id' });
-        photoStore.createIndex('by-date', 'date');
+          const photoStore = db.createObjectStore('photos', { keyPath: 'id' });
+          photoStore.createIndex('by-date', 'date');
 
-        db.createObjectStore('programs', { keyPath: 'id' });
+          db.createObjectStore('programs', { keyPath: 'id' });
 
-        const prStore = db.createObjectStore('personalRecords', { keyPath: 'id' });
-        prStore.createIndex('by-exercise', 'exercise');
+          const prStore = db.createObjectStore('personalRecords', { keyPath: 'id' });
+          prStore.createIndex('by-exercise', 'exercise');
+        }
+
+        if (oldVersion < 2) {
+          const customExStore = db.createObjectStore('customExercises', { keyPath: 'id' });
+          customExStore.createIndex('by-category', 'category');
+          customExStore.createIndex('by-muscle', 'muscleGroup');
+        }
       },
     });
   }
@@ -182,13 +209,41 @@ export async function getPersonalRecords(exercise?: string) {
   return db.getAll('personalRecords');
 }
 
+// --- Custom Exercises CRUD ---
+
+export async function addCustomExercise(exercise: FitTrackDB['customExercises']['value']) {
+  const db = await getDB();
+  await db.put('customExercises', exercise);
+}
+
+export async function getCustomExercises(category?: string) {
+  const db = await getDB();
+  if (category) {
+    return db.getAllFromIndex('customExercises', 'by-category', category);
+  }
+  return db.getAll('customExercises');
+}
+
+export async function deleteCustomExercise(id: string) {
+  const db = await getDB();
+  await db.delete('customExercises', id);
+}
+
+export async function getAllExerciseNames(): Promise<string[]> {
+  const custom = await getCustomExercises();
+  const customNames = custom.map((e) => e.name);
+  const merged = [...COMMON_EXERCISES, ...customNames];
+  // Deduplicate and sort
+  return [...new Set(merged)].sort((a, b) => a.localeCompare(b));
+}
+
 export function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2);
 }
 
 // --- Data Backup / Restore ---
 
-const STORE_NAMES = ['workouts', 'weightLog', 'photos', 'programs', 'personalRecords'] as const;
+const STORE_NAMES = ['workouts', 'weightLog', 'photos', 'programs', 'personalRecords', 'customExercises'] as const;
 type StoreName = typeof STORE_NAMES[number];
 
 export interface FitTrackBackup {
