@@ -2,13 +2,14 @@
 
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { Home, Dumbbell, ListChecks, Scale, Camera, ClipboardList } from "lucide-react";
+import { Home, Dumbbell, ListChecks, Scale, Ruler, Camera, ClipboardList } from "lucide-react";
 
 const tabs = [
   { href: "/", label: "Home", icon: Home },
   { href: "/workouts", label: "Workouts", icon: ListChecks },
   { href: "/exercises", label: "Exercises", icon: Dumbbell },
   { href: "/log", label: "Log", icon: Scale },
+  { href: "/measurements", label: "Measure", icon: Ruler },
   { href: "/timeline", label: "Timeline", icon: Camera },
   { href: "/programs", label: "Programs", icon: ClipboardList },
 ];
