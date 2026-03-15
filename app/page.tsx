@@ -103,107 +103,112 @@ export default function DashboardPage() {
   const greeting = () => {
     const h = new Date().getHours();
     if (h < 12) return "Good morning";
-    if (h < 17) return "Good afternoon";
-    return "Good evening";
+    return "Good afternoon";
   };
 
   if (loading) {
     return (
-      <div className="px-4 pt-6 flex items-center justify-center min-h-[60vh]">
+      <div className="flex items-center justify-center min-h-screen">
         <div className="w-8 h-8 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="px-4 pt-6">
+    <div className="px-4 pt-6 pb-24 animate-fade-in">
       {/* Header */}
       <div className="mb-6">
-        <p className="text-sm text-gray-400">{greeting()}</p>
-        <h1 className="text-2xl font-bold">FitTrack</h1>
+        <p className="text-sm text-gray-500 mb-1">{greeting()}</p>
+        <div className="flex items-center justify-between">
+          <h1 className="text-3xl font-bold">FitTrack</h1>
+          <Link
+            href="/settings"
+            className="w-9 h-9 rounded-xl bg-gray-800 flex items-center justify-center hover:bg-gray-700 transition-colors touch-active"
+          >
+            <Settings size={18} className="text-gray-400" />
+          </Link>
+        </div>
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 gap-3 mb-6 stagger-children">
+      <div className="grid grid-cols-2 gap-3 mb-6">
         <div className="card">
           <div className="flex items-center gap-2 mb-2">
-            <div className="w-8 h-8 rounded-lg bg-violet-600/20 flex items-center justify-center">
-              <Scale size={16} className="text-violet-400" />
-            </div>
-            <span className="text-xs text-gray-400">Weight</span>
+            <Scale size={16} className="text-blue-400" />
+            <span className="text-xs text-gray-500">Weight</span>
           </div>
-          <p className="text-xl font-bold">
+          <p className="text-2xl font-bold">
             {stats.latestWeight ? `${stats.latestWeight} lbs` : "--"}
           </p>
         </div>
 
         <div className="card">
           <div className="flex items-center gap-2 mb-2">
-            <div className="w-8 h-8 rounded-lg bg-blue-600/20 flex items-center justify-center">
-              <Dumbbell size={16} className="text-blue-400" />
-            </div>
-            <span className="text-xs text-gray-400">Workouts</span>
+            <Dumbbell size={16} className="text-violet-400" />
+            <span className="text-xs text-gray-500">Workouts</span>
           </div>
-          <p className="text-xl font-bold">{stats.totalWorkouts}</p>
+          <p className="text-2xl font-bold">{stats.totalWorkouts}</p>
         </div>
 
         <div className="card">
           <div className="flex items-center gap-2 mb-2">
-            <div className="w-8 h-8 rounded-lg bg-orange-600/20 flex items-center justify-center">
-              <Flame size={16} className="text-orange-400" />
-            </div>
-            <span className="text-xs text-gray-400">Streak</span>
+            <Flame size={16} className="text-orange-400" />
+            <span className="text-xs text-gray-500">Streak</span>
           </div>
-          <p className="text-xl font-bold">
+          <p className="text-2xl font-bold">
             {stats.streak} day{stats.streak !== 1 ? "s" : ""}
           </p>
         </div>
 
         <div className="card">
           <div className="flex items-center gap-2 mb-2">
-            <div className="w-8 h-8 rounded-lg bg-yellow-600/20 flex items-center justify-center">
-              <Trophy size={16} className="text-yellow-400" />
-            </div>
-            <span className="text-xs text-gray-400">Latest PR</span>
+            <Trophy size={16} className="text-yellow-400" />
+            <span className="text-xs text-gray-500">Latest PR</span>
           </div>
           {stats.latestPR ? (
             <div>
-              <p className="text-sm font-bold">{stats.latestPR.weight} lbs</p>
-              <p className="text-xs text-gray-500">
+              <p className="text-2xl font-bold">
+                {stats.latestPR.weight} lbs
+              </p>
+              <p className="text-xs text-gray-500 mt-0.5">
                 {stats.latestPR.exercise} x{stats.latestPR.reps}
               </p>
             </div>
           ) : (
-            <p className="text-xl font-bold">--</p>
+            <div>
+              <p className="text-2xl font-bold">--</p>
+            </div>
           )}
         </div>
       </div>
 
       {/* Activity Heatmap */}
-      <h2 className="text-sm font-semibold text-gray-400 mb-3">Activity</h2>
-      <div className="card mb-6">
+      <div className="card mb-4">
+        <h2 className="text-base font-semibold mb-3">Activity</h2>
         <WorkoutHeatmap workouts={allWorkouts} />
       </div>
 
       {/* Muscle Balance Chart */}
       {recentWorkouts.length > 0 && (
         <>
-          <h2 className="text-sm font-semibold text-gray-400 mb-3">Muscle Balance (7 Days)</h2>
-          <div className="card mb-6">
+          <div className="card mb-4">
+            <h2 className="text-base font-semibold mb-3">Muscle Balance (7 Days)</h2>
             <MuscleGroupChart workouts={recentWorkouts} customExercises={customExercises} />
           </div>
         </>
       )}
 
       {/* Quick Actions */}
-      <h2 className="text-sm font-semibold text-gray-400 mb-3">Quick Actions</h2>
-      <div className="grid grid-cols-2 gap-3">
-        <Link href="/workouts" className="btn-secondary text-center flex items-center justify-center gap-2">
-          <Dumbbell size={18} /> Log Workout
-        </Link>
-        <Link href="/log" className="btn-secondary text-center flex items-center justify-center gap-2">
-          <Scale size={18} /> Log Weight
-        </Link>
+      <div className="card">
+        <h2 className="text-base font-semibold mb-3">Quick Actions</h2>
+        <div className="grid grid-cols-2 gap-2">
+          <Link href="/workouts" className="btn-primary text-center text-sm">
+            Log Workout
+          </Link>
+          <Link href="/log" className="btn-secondary text-center text-sm">
+            Log Weight
+          </Link>
+        </div>
       </div>
     </div>
   );
