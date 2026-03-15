@@ -92,13 +92,30 @@ interface FitTrackDB extends DBSchema {
       createdAt: string;
     };
   };
+  measurements: {
+    key: string;
+    value: {
+      id: string;
+      date: string;
+      chest?: number;
+      waist?: number;
+      hips?: number;
+      bicepLeft?: number;
+      bicepRight?: number;
+      thighLeft?: number;
+      thighRight?: number;
+      neck?: number;
+      notes?: string;
+    };
+    indexes: { 'by-date': string };
+  };
 }
 
 let dbPromise: Promise<IDBPDatabase<FitTrackDB>> | null = null;
 
 function getDB() {
   if (!dbPromise) {
-    dbPromise = openDB<FitTrackDB>('fittrack', 3, {
+    dbPromise = openDB<FitTrackDB>('fittrack', 4, {
       upgrade(db, oldVersion) {
         if (oldVersion < 1) {
           const workoutStore = db.createObjectStore('workouts', { keyPath: 'id' });
@@ -124,6 +141,11 @@ function getDB() {
 
         if (oldVersion < 3) {
           db.createObjectStore('workoutTemplates', { keyPath: 'id' });
+        }
+
+        if (oldVersion < 4) {
+          const measurementStore = db.createObjectStore('measurements', { keyPath: 'id' });
+          measurementStore.createIndex('by-date', 'date');
         }
       },
     });
@@ -279,6 +301,39 @@ export async function deleteWorkoutTemplate(id: string) {
   await db.delete('workoutTemplates', id);
 }
 
+// --- Measurements CRUD ---
+
+export interface Measurement {
+  id: string;
+  date: string;
+  chest?: number;
+  waist?: number;
+  hips?: number;
+  bicepLeft?: number;
+  bicepRight?: number;
+  thighLeft?: number;
+  thighRight?: number;
+  neck?: number;
+  notes?: string;
+}
+
+export async function addMeasurement(measurement: Measurement) {
+  const db = await getDB();
+  await db.put('measurements', measurement);
+}
+
+export async function getMeasurements(limit?: number): Promise<Measurement[]> {
+  const db = await getDB();
+  const all = await db.getAllFromIndex('measurements', 'by-date');
+  const sorted = all.reverse();
+  return limit ? sorted.slice(0, limit) : sorted;
+}
+
+export async function deleteMeasurement(id: string) {
+  const db = await getDB();
+  await db.delete('measurements', id);
+}
+
 // --- Exercise History (for progressive overload) ---
 
 export async function getExerciseHistory(
@@ -311,7 +366,7 @@ export async function getExerciseHistory(
 
 // --- Data Backup / Restore ---
 
-const STORE_NAMES = ['workouts', 'weightLog', 'photos', 'programs', 'personalRecords', 'customExercises', 'workoutTemplates'] as const;
+const STORE_NAMES = ['workouts', 'weightLog', 'photos', 'programs', 'personalRecords', 'customExercises', 'workoutTemplates', 'measurements'] as const;
 type StoreName = typeof STORE_NAMES[number];
 
 export interface FitTrackBackup {
