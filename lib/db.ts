@@ -53,11 +53,13 @@ interface FitTrackDB extends DBSchema {
       name: string;
       description?: string;
       days: {
-        name: string;
-        exercises: { name: string; sets: number; reps: string; restSeconds?: number }[];
+        id: string;
+        label: string;
+        exercises: { name: string; sets: number; reps: number; restSeconds?: number }[];
       }[];
       isActive: boolean;
       createdAt: string;
+      completedDays?: string[];
     };
   };
   personalRecords: {
