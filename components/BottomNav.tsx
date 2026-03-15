@@ -2,11 +2,12 @@
 
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { Home, Dumbbell, Scale, Camera, ClipboardList } from "lucide-react";
+import { Home, Dumbbell, ListChecks, Scale, Camera, ClipboardList } from "lucide-react";
 
 const tabs = [
   { href: "/", label: "Home", icon: Home },
-  { href: "/workouts", label: "Workouts", icon: Dumbbell },
+  { href: "/workouts", label: "Workouts", icon: ListChecks },
+  { href: "/exercises", label: "Exercises", icon: Dumbbell },
   { href: "/log", label: "Log", icon: Scale },
   { href: "/timeline", label: "Timeline", icon: Camera },
   { href: "/programs", label: "Programs", icon: ClipboardList },
@@ -17,7 +18,7 @@ export default function BottomNav() {
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 bg-gray-950/80 backdrop-blur-xl border-t border-gray-800">
-      <div className="flex items-center justify-around max-w-lg mx-auto px-2 pt-2 pb-[env(safe-area-inset-bottom,8px)]">
+      <div className="flex items-center justify-around max-w-lg mx-auto px-1 pt-2 pb-[env(safe-area-inset-bottom,8px)]">
         {tabs.map((tab) => {
           const isActive =
             tab.href === "/"
@@ -29,7 +30,7 @@ export default function BottomNav() {
             <Link
               key={tab.href}
               href={tab.href}
-              className={`touch-active flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl transition-all ${
+              className={`touch-active flex flex-col items-center gap-0.5 px-2 py-1.5 rounded-xl transition-all ${
                 isActive
                   ? "text-violet-500"
                   : "text-gray-500 hover:text-gray-300"
@@ -37,7 +38,7 @@ export default function BottomNav() {
             >
               <div className="relative">
                 <Icon
-                  size={22}
+                  size={20}
                   strokeWidth={isActive ? 2.5 : 2}
                   className={`transition-transform duration-200 ${
                     isActive ? "scale-110" : "scale-100"
