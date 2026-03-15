@@ -185,3 +185,80 @@ export async function getPersonalRecords(exercise?: string) {
 export function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2);
 }
+
+// --- Data Backup / Restore ---
+
+const STORE_NAMES = ['workouts', 'weightLog', 'photos', 'programs', 'personalRecords'] as const;
+type StoreName = typeof STORE_NAMES[number];
+
+export interface FitTrackBackup {
+  metadata: {
+    exportDate: string;
+    appVersion: string;
+    storeCount: Record<string, number>;
+  };
+  data: Record<string, unknown[]>;
+}
+
+export async function exportAllData(): Promise<FitTrackBackup> {
+  const db = await getDB();
+  const data: Record<string, unknown[]> = {};
+  const storeCount: Record<string, number> = {};
+
+  for (const store of STORE_NAMES) {
+    const items = await db.getAll(store);
+    data[store] = items;
+    storeCount[store] = items.length;
+  }
+
+  return {
+    metadata: {
+      exportDate: new Date().toISOString(),
+      appVersion: '0.1.0',
+      storeCount,
+    },
+    data,
+  };
+}
+
+export function validateBackup(json: unknown): json is FitTrackBackup {
+  if (typeof json !== 'object' || json === null) return false;
+  const obj = json as Record<string, unknown>;
+  if (typeof obj.metadata !== 'object' || obj.metadata === null) return false;
+  if (typeof obj.data !== 'object' || obj.data === null) return false;
+
+  const meta = obj.metadata as Record<string, unknown>;
+  if (typeof meta.exportDate !== 'string') return false;
+  if (typeof meta.appVersion !== 'string') return false;
+
+  const data = obj.data as Record<string, unknown>;
+  for (const store of STORE_NAMES) {
+    if (data[store] !== undefined && !Array.isArray(data[store])) return false;
+  }
+
+  return true;
+}
+
+export async function importAllData(backup: FitTrackBackup): Promise<{ imported: Record<string, number> }> {
+  const db = await getDB();
+  const imported: Record<string, number> = {};
+
+  for (const store of STORE_NAMES) {
+    const tx = db.transaction(store, 'readwrite');
+    await tx.store.clear();
+
+    const items = backup.data[store];
+    if (items && Array.isArray(items)) {
+      for (const item of items) {
+        await tx.store.put(item as never);
+      }
+      imported[store] = items.length;
+    } else {
+      imported[store] = 0;
+    }
+
+    await tx.done;
+  }
+
+  return { imported };
+}
