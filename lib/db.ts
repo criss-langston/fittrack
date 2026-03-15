@@ -20,6 +20,7 @@ interface FitTrackDB extends DBSchema {
       duration?: number;
       notes?: string;
       programId?: string;
+      supersets?: { exerciseIndices: number[] }[];
     };
     indexes: { 'by-date': string };
   };
@@ -82,13 +83,22 @@ interface FitTrackDB extends DBSchema {
     };
     indexes: { 'by-category': string; 'by-muscle': string };
   };
+  workoutTemplates: {
+    key: string;
+    value: {
+      id: string;
+      name: string;
+      exercises: { name: string; sets: number; reps: number }[];
+      createdAt: string;
+    };
+  };
 }
 
 let dbPromise: Promise<IDBPDatabase<FitTrackDB>> | null = null;
 
 function getDB() {
   if (!dbPromise) {
-    dbPromise = openDB<FitTrackDB>('fittrack', 2, {
+    dbPromise = openDB<FitTrackDB>('fittrack', 3, {
       upgrade(db, oldVersion) {
         if (oldVersion < 1) {
           const workoutStore = db.createObjectStore('workouts', { keyPath: 'id' });
@@ -110,6 +120,10 @@ function getDB() {
           const customExStore = db.createObjectStore('customExercises', { keyPath: 'id' });
           customExStore.createIndex('by-category', 'category');
           customExStore.createIndex('by-muscle', 'muscleGroup');
+        }
+
+        if (oldVersion < 3) {
+          db.createObjectStore('workoutTemplates', { keyPath: 'id' });
         }
       },
     });
@@ -241,9 +255,63 @@ export function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2);
 }
 
+// --- Workout Templates CRUD ---
+
+export interface WorkoutTemplate {
+  id: string;
+  name: string;
+  exercises: { name: string; sets: number; reps: number }[];
+  createdAt: string;
+}
+
+export async function addWorkoutTemplate(template: WorkoutTemplate) {
+  const db = await getDB();
+  await db.put('workoutTemplates', template);
+}
+
+export async function getWorkoutTemplates(): Promise<WorkoutTemplate[]> {
+  const db = await getDB();
+  return db.getAll('workoutTemplates');
+}
+
+export async function deleteWorkoutTemplate(id: string) {
+  const db = await getDB();
+  await db.delete('workoutTemplates', id);
+}
+
+// --- Exercise History (for progressive overload) ---
+
+export async function getExerciseHistory(
+  exerciseName: string,
+  limit: number
+): Promise<{ date: string; sets: { reps: number; weight: number }[] }[]> {
+  const db = await getDB();
+  const all = await db.getAllFromIndex('workouts', 'by-date');
+  const sorted = all.reverse();
+
+  const results: { date: string; sets: { reps: number; weight: number }[] }[] = [];
+
+  for (const workout of sorted) {
+    for (const ex of workout.exercises) {
+      if (ex.name.toLowerCase() === exerciseName.toLowerCase()) {
+        results.push({
+          date: workout.date,
+          sets: ex.sets
+            .filter((s) => s.completed)
+            .map((s) => ({ reps: s.reps, weight: s.weight })),
+        });
+        break;
+      }
+    }
+    if (results.length >= limit) break;
+  }
+
+  return results;
+}
+
 // --- Data Backup / Restore ---
 
-const STORE_NAMES = ['workouts', 'weightLog', 'photos', 'programs', 'personalRecords', 'customExercises'] as const;
+const STORE_NAMES = ['workouts', 'weightLog', 'photos', 'programs', 'personalRecords', 'customExercises', 'workoutTemplates'] as const;
 type StoreName = typeof STORE_NAMES[number];
 
 export interface FitTrackBackup {
