@@ -7,6 +7,75 @@ export const COMMON_EXERCISES = [
   "Leg Extension","Calf Raise","Face Pull","Dips","Lunges",
 ];
 
+// ─── Specific muscles per general group ───────────────────────────────────────
+export const SPECIFIC_MUSCLES: Record<string, string[]> = {
+  Chest: [
+    'Pectoralis Major (Sternal)',
+    'Pectoralis Major (Clavicular)',
+    'Pectoralis Minor',
+    'Serratus Anterior',
+  ],
+  Back: [
+    'Latissimus Dorsi',
+    'Trapezius (Upper)',
+    'Trapezius (Middle)',
+    'Trapezius (Lower)',
+    'Rhomboids',
+    'Erector Spinae',
+    'Teres Major',
+    'Teres Minor',
+    'Infraspinatus',
+  ],
+  Shoulders: [
+    'Anterior Deltoid',
+    'Lateral Deltoid',
+    'Posterior Deltoid',
+    'Rotator Cuff',
+  ],
+  Arms: [
+    'Biceps Brachii (Long Head)',
+    'Biceps Brachii (Short Head)',
+    'Brachialis',
+    'Brachioradialis',
+    'Triceps (Long Head)',
+    'Triceps (Lateral Head)',
+    'Triceps (Medial Head)',
+    'Forearm Flexors',
+    'Forearm Extensors',
+  ],
+  Legs: [
+    'Quadriceps (Rectus Femoris)',
+    'Quadriceps (Vastus Lateralis)',
+    'Quadriceps (Vastus Medialis)',
+    'Hamstrings (Biceps Femoris)',
+    'Hamstrings (Semitendinosus)',
+    'Glutes (Gluteus Maximus)',
+    'Glutes (Gluteus Medius)',
+    'Hip Flexors',
+    'Adductors',
+    'Gastrocnemius',
+    'Soleus',
+    'Tibialis Anterior',
+  ],
+  Core: [
+    'Rectus Abdominis',
+    'Obliques (External)',
+    'Obliques (Internal)',
+    'Transverse Abdominis',
+    'Multifidus',
+    'Hip Flexors',
+  ],
+  'Full Body': [],
+};
+
+// Map specific muscle -> general group (for chart aggregation)
+export function getGeneralGroupForSpecific(specificMuscle: string): string | null {
+  for (const [group, muscles] of Object.entries(SPECIFIC_MUSCLES)) {
+    if (muscles.includes(specificMuscle)) return group;
+  }
+  return null;
+}
+
 interface FitTrackDB extends DBSchema {
   workouts: {
     key: string;
@@ -19,6 +88,7 @@ interface FitTrackDB extends DBSchema {
       }[];
       duration?: number;
       notes?: string;
+      rpe?: number;
       programId?: string;
       supersets?: { exerciseIndices: number[] }[];
     };
@@ -53,13 +123,11 @@ interface FitTrackDB extends DBSchema {
       name: string;
       description?: string;
       days: {
-        id: string;
-        label: string;
-        exercises: { name: string; sets: number; reps: number; restSeconds?: number }[];
+        name: string;
+        exercises: { name: string; sets: number; reps: string; restSeconds?: number }[];
       }[];
       isActive: boolean;
       createdAt: string;
-      completedDays?: string[];
     };
   };
   personalRecords: {
@@ -80,6 +148,7 @@ interface FitTrackDB extends DBSchema {
       name: string;
       category: 'machine' | 'cable' | 'barbell' | 'dumbbell' | 'bodyweight' | 'other';
       muscleGroup: string;
+      specificMuscles?: string[];
       notes?: string;
       createdAt: string;
     };
@@ -271,7 +340,6 @@ export async function getAllExerciseNames(): Promise<string[]> {
   const custom = await getCustomExercises();
   const customNames = custom.map((e) => e.name);
   const merged = [...COMMON_EXERCISES, ...customNames];
-  // Deduplicate and sort
   return [...new Set(merged)].sort((a, b) => a.localeCompare(b));
 }
 
@@ -336,23 +404,24 @@ export async function deleteMeasurement(id: string) {
   await db.delete('measurements', id);
 }
 
-// --- Exercise History (for progressive overload) ---
+// --- Exercise History (for progressive overload + detail page) ---
 
 export async function getExerciseHistory(
   exerciseName: string,
   limit: number
-): Promise<{ date: string; sets: { reps: number; weight: number }[] }[]> {
+): Promise<{ date: string; workoutId: string; sets: { reps: number; weight: number }[] }[]> {
   const db = await getDB();
   const all = await db.getAllFromIndex('workouts', 'by-date');
   const sorted = all.reverse();
 
-  const results: { date: string; sets: { reps: number; weight: number }[] }[] = [];
+  const results: { date: string; workoutId: string; sets: { reps: number; weight: number }[] }[] = [];
 
   for (const workout of sorted) {
     for (const ex of workout.exercises) {
       if (ex.name.toLowerCase() === exerciseName.toLowerCase()) {
         results.push({
           date: workout.date,
+          workoutId: workout.id,
           sets: ex.sets
             .filter((s) => s.completed)
             .map((s) => ({ reps: s.reps, weight: s.weight })),
@@ -375,9 +444,9 @@ export interface FitTrackBackup {
   metadata: {
     exportDate: string;
     appVersion: string;
-    storeCount: Record<string, number>;
+    storeCount: Record<StoreName, number>;
   };
-  data: Record<string, unknown[]>;
+  data: Record<StoreName, unknown[]>;
 }
 
 export async function exportAllData(): Promise<FitTrackBackup> {
@@ -419,7 +488,7 @@ export function validateBackup(json: unknown): json is FitTrackBackup {
   return true;
 }
 
-export async function importAllData(backup: FitTrackBackup): Promise<{ imported: Record<string, number> }> {
+export async function importAllData(backup: FitTrackBackup): Promise<{ imported: Record<StoreName, number> }> {
   const db = await getDB();
   const imported: Record<string, number> = {};
 
