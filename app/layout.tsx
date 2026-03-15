@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import BottomNav from "@/components/BottomNav";
 import InstallPrompt from "@/components/InstallPrompt";
+import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -35,6 +36,7 @@ export default function RootLayout({
       <body className={`${inter.className} bg-gray-950 text-white antialiased`}>
         <main className="min-h-screen pb-24">{children}</main>
         <InstallPrompt />
+        <ServiceWorkerRegistration />
         <BottomNav />
       </body>
     </html>
