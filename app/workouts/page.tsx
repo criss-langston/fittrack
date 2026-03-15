@@ -29,6 +29,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import RestTimer from "@/components/RestTimer";
+import Confetti from "@/components/Confetti";
 
 interface WorkoutSet {
   reps: number;
@@ -84,6 +85,9 @@ export default function WorkoutsPage() {
   const [supersets, setSupersets] = useState<SupersetGroup[]>([]);
   const [showSupersetSelect, setShowSupersetSelect] = useState(false);
   const [supersetSelection, setSupersetSelection] = useState<Set<number>>(new Set());
+
+  // PR Confetti state
+  const [confettiTrigger, setConfettiTrigger] = useState(false);
 
   const loadWorkouts = useCallback(async () => {
     const data = await getWorkouts();
@@ -143,6 +147,7 @@ export default function WorkoutsPage() {
     setDismissedAlerts(new Set());
     setSupersetSelection(new Set());
     setShowSupersetSelect(false);
+    setConfettiTrigger(false);
     loadExerciseNames();
     loadTemplates();
   };
@@ -157,6 +162,7 @@ export default function WorkoutsPage() {
     setOverloadAlerts({});
     setDismissedAlerts(new Set());
     setShowRestTimer(false);
+    setConfettiTrigger(false);
   };
 
   const addExercise = (name: string) => {
@@ -278,6 +284,15 @@ export default function WorkoutsPage() {
     }
     setNewPRs(prs);
     setShowRestTimer(false);
+
+    // Trigger confetti if PRs detected
+    if (prs.length > 0) {
+      setConfettiTrigger(false);
+      // Small delay to ensure rising edge detection
+      requestAnimationFrame(() => {
+        setConfettiTrigger(true);
+      });
+    }
 
     // Show save-as-template prompt before clearing
     if (exercises.length > 0) {
@@ -431,11 +446,14 @@ export default function WorkoutsPage() {
 
   return (
     <div className="px-4 pt-6 pb-4">
-      {/* PR celebration */}
+      {/* PR Confetti */}
+      <Confetti trigger={confettiTrigger} />
+
+      {/* PR celebration toast */}
       {newPRs.length > 0 && (
-        <div className="fixed inset-x-4 top-4 z-50 rounded-2xl bg-violet-600 p-4 shadow-lg shadow-violet-600/30 animate-pulse">
+        <div className="fixed inset-x-4 top-4 z-50 rounded-2xl bg-gradient-to-r from-violet-600 to-violet-500 p-4 shadow-lg shadow-violet-600/40 animate-slide-up">
           <div className="flex items-center gap-2 mb-1">
-            <Trophy size={20} />
+            <Trophy size={20} className="text-yellow-300" />
             <span className="font-bold">New Personal Record{newPRs.length > 1 ? "s" : ""}!</span>
           </div>
           {newPRs.map((pr, i) => (
