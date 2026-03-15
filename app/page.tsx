@@ -1,9 +1,27 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { getWorkouts, getWeightEntries, getPersonalRecords } from "@/lib/db";
+import { getWorkouts, getWeightEntries, getPersonalRecords, getCustomExercises } from "@/lib/db";
 import { Dumbbell, Scale, Trophy, Flame, Settings } from "lucide-react";
 import Link from "next/link";
+import WorkoutHeatmap from "@/components/WorkoutHeatmap";
+import MuscleGroupChart from "@/components/MuscleGroupChart";
+
+interface WorkoutData {
+  id: string;
+  date: string;
+  exercises: {
+    name: string;
+    sets: { reps: number; weight: number; completed: boolean }[];
+  }[];
+}
+
+interface CustomExercise {
+  id: string;
+  name: string;
+  category: string;
+  muscleGroup: string;
+}
 
 interface Stats {
   latestWeight: number | null;
@@ -19,15 +37,30 @@ export default function DashboardPage() {
     streak: 0,
     latestPR: null,
   });
+  const [allWorkouts, setAllWorkouts] = useState<WorkoutData[]>([]);
+  const [recentWorkouts, setRecentWorkouts] = useState<WorkoutData[]>([]);
+  const [customExercises, setCustomExercises] = useState<CustomExercise[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
-      const [workouts, weightEntries, prs] = await Promise.all([
+      const [workouts, weightEntries, prs, customs] = await Promise.all([
         getWorkouts(),
         getWeightEntries(1),
         getPersonalRecords(),
+        getCustomExercises(),
       ]);
+
+      setAllWorkouts(workouts as WorkoutData[]);
+
+      // Filter workouts from last 7 days for muscle chart
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      const recent = (workouts as WorkoutData[]).filter(
+        (w) => new Date(w.date) >= sevenDaysAgo
+      );
+      setRecentWorkouts(recent);
+      setCustomExercises(customs as CustomExercise[]);
 
       // Calculate streak
       let streak = 0;
@@ -145,6 +178,22 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
+
+      {/* Activity Heatmap */}
+      <h2 className="text-sm font-semibold text-gray-400 mb-3">Activity</h2>
+      <div className="card mb-6">
+        <WorkoutHeatmap workouts={allWorkouts} />
+      </div>
+
+      {/* Muscle Balance Chart */}
+      {recentWorkouts.length > 0 && (
+        <>
+          <h2 className="text-sm font-semibold text-gray-400 mb-3">Muscle Balance (7 Days)</h2>
+          <div className="card mb-6">
+            <MuscleGroupChart workouts={recentWorkouts} customExercises={customExercises} />
+          </div>
+        </>
+      )}
 
       {/* Quick Actions */}
       <h2 className="text-sm font-semibold text-gray-400 mb-3">Quick Actions</h2>
