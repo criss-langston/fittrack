@@ -8,15 +8,9 @@ import {
   addPersonalRecord,
   getPersonalRecords,
   generateId,
+  getAllExerciseNames,
 } from "@/lib/db";
 import { Plus, Trash2, ChevronDown, ChevronUp, Trophy, X } from "lucide-react";
-
-const COMMON_EXERCISES = [
-  "Bench Press","Squat","Deadlift","Overhead Press","Barbell Row",
-  "Pull Up","Lat Pulldown","Leg Press","Romanian Deadlift","Incline Bench Press",
-  "Dumbbell Curl","Tricep Pushdown","Lateral Raise","Cable Fly","Leg Curl",
-  "Leg Extension","Calf Raise","Face Pull","Dips","Lunges",
-];
 
 interface WorkoutSet {
   reps: number;
@@ -39,6 +33,7 @@ interface Workout {
 
 export default function WorkoutsPage() {
   const [workouts, setWorkouts] = useState<Workout[]>([]);
+  const [availableExercises, setAvailableExercises] = useState<string[]>([]);
   const [isNew, setIsNew] = useState(false);
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -52,14 +47,22 @@ export default function WorkoutsPage() {
     setWorkouts(data as Workout[]);
   }, []);
 
+  const loadExerciseNames = useCallback(async () => {
+    const names = await getAllExerciseNames();
+    setAvailableExercises(names);
+  }, []);
+
   useEffect(() => {
     loadWorkouts();
-  }, [loadWorkouts]);
+    loadExerciseNames();
+  }, [loadWorkouts, loadExerciseNames]);
 
   const startNewWorkout = () => {
     setIsNew(true);
     setExercises([]);
     setNewPRs([]);
+    // Refresh exercise list when starting a new workout
+    loadExerciseNames();
   };
 
   const cancelWorkout = () => {
@@ -186,7 +189,7 @@ export default function WorkoutsPage() {
       day: "numeric",
     });
 
-  const filteredSuggestions = COMMON_EXERCISES.filter(
+  const filteredSuggestions = availableExercises.filter(
     (e) =>
       e.toLowerCase().includes(searchTerm.toLowerCase()) &&
       !exercises.some((ex) => ex.name === e)
