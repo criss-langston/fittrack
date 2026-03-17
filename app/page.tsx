@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { getWorkouts, getWeightEntries, getPersonalRecords, getCustomExercises } from "@/lib/db";
-import { Dumbbell, Scale, Trophy, Flame, Settings } from "lucide-react";
+import { getWorkouts, getWeightEntries, getPersonalRecords, getCustomExercises, getDailyNutritionSummary } from "@/lib/db";
+import { Dumbbell, Scale, Trophy, Flame, Settings, Utensils } from "lucide-react";
 import Link from "next/link";
 import WorkoutHeatmap from "@/components/WorkoutHeatmap";
 import MuscleGroupChart from "@/components/MuscleGroupChart";
@@ -28,6 +28,12 @@ interface Stats {
   totalWorkouts: number;
   streak: number;
   latestPR: { exercise: string; weight: number; reps: number } | null;
+  todayCalories: number;
+  todayProtein: number;
+}
+
+function getTodayISO() {
+  return new Date().toISOString().split('T')[0];
 }
 
 export default function DashboardPage() {
@@ -36,6 +42,8 @@ export default function DashboardPage() {
     totalWorkouts: 0,
     streak: 0,
     latestPR: null,
+    todayCalories: 0,
+    todayProtein: 0,
   });
   const [allWorkouts, setAllWorkouts] = useState<WorkoutData[]>([]);
   const [recentWorkouts, setRecentWorkouts] = useState<WorkoutData[]>([]);
@@ -44,11 +52,12 @@ export default function DashboardPage() {
 
   useEffect(() => {
     async function load() {
-      const [workouts, weightEntries, prs, customs] = await Promise.all([
+      const [workouts, weightEntries, prs, customs, nutrition] = await Promise.all([
         getWorkouts(),
         getWeightEntries(1),
         getPersonalRecords(),
         getCustomExercises(),
+        getDailyNutritionSummary(getTodayISO()),
       ]);
 
       setAllWorkouts(workouts as WorkoutData[]);
@@ -94,6 +103,8 @@ export default function DashboardPage() {
         latestPR: sortedPRs.length > 0
           ? { exercise: sortedPRs[0].exercise, weight: sortedPRs[0].weight, reps: sortedPRs[0].reps }
           : null,
+        todayCalories: nutrition.totalCalories,
+        todayProtein: nutrition.totalProtein,
       });
       setLoading(false);
     }
@@ -182,6 +193,27 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* Today's Nutrition */}
+      <div className="card mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Utensils size={16} className="text-green-400" />
+            <h2 className="text-base font-semibold">Today&apos;s Nutrition</h2>
+          </div>
+          <Link href="/nutrition" className="text-xs text-violet-400 hover:text-violet-300">View All</Link>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <p className="text-xs text-gray-500">Calories</p>
+            <p className="text-xl font-bold">{stats.todayCalories}</p>
+          </div>
+          <div>
+            <p className="text-xs text-gray-500">Protein</p>
+            <p className="text-xl font-bold">{stats.todayProtein}g</p>
+          </div>
+        </div>
+      </div>
+
       {/* Activity Heatmap */}
       <div className="card mb-4">
         <h2 className="text-base font-semibold mb-3">Activity</h2>
@@ -205,8 +237,8 @@ export default function DashboardPage() {
           <Link href="/workouts" className="btn-primary text-center text-sm">
             Log Workout
           </Link>
-          <Link href="/log" className="btn-secondary text-center text-sm">
-            Log Weight
+          <Link href="/nutrition" className="btn-secondary text-center text-sm">
+            Log Meal
           </Link>
         </div>
       </div>
