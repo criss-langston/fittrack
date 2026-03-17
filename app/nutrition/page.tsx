@@ -88,14 +88,12 @@ export default function NutritionPage() {
   const [loading, setLoading] = useState(true);
   const [expandedMeal, setExpandedMeal] = useState<string | null>(null);
 
-  // Add meal modal
   const [showAddMeal, setShowAddMeal] = useState(false);
   const [newMealType, setNewMealType] = useState<typeof MEAL_TYPES[number]>('breakfast');
   const [foodSearch, setFoodSearch] = useState('');
   const [foodResults, setFoodResults] = useState<FoodItem[]>([]);
   const [selectedFoods, setSelectedFoods] = useState<FoodEntry[]>([]);
 
-  // Custom food form
   const [showCustomFood, setShowCustomFood] = useState(false);
   const [customFood, setCustomFood] = useState({ name: '', calories: 0, protein: 0, carbs: 0, fat: 0, servingSize: '' });
 
@@ -250,7 +248,6 @@ export default function NutritionPage() {
   const customFoodCal = customFood.protein * 4 + customFood.carbs * 4 + customFood.fat * 9;
   const selectedTotal = totalMealMacros(selectedFoods);
 
-  // Macro ring percentages (assuming 2000 cal, 150g protein, 250g carbs, 65g fat defaults)
   const calGoal = 2000;
   const proGoal = 150;
   const carbGoal = 250;
@@ -258,7 +255,6 @@ export default function NutritionPage() {
 
   return (
     <div className="px-4 pt-6 pb-24 animate-fade-in">
-      {/* Header with date navigation */}
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">Nutrition</h1>
         <div className="flex items-center gap-2">
@@ -282,7 +278,6 @@ export default function NutritionPage() {
         </div>
       ) : (
         <>
-          {/* Daily Summary Cards */}
           <div className="grid grid-cols-2 gap-3 mb-4">
             <div className="card col-span-2">
               <div className="flex items-center justify-between mb-2">
@@ -346,7 +341,6 @@ export default function NutritionPage() {
             </div>
           </div>
 
-          {/* Weekly Averages */}
           {weeklyAvg.calories > 0 && (
             <div className="card mb-4">
               <h3 className="text-xs text-gray-500 mb-2">7-Day Average</h3>
@@ -371,7 +365,6 @@ export default function NutritionPage() {
             </div>
           )}
 
-          {/* Meals List */}
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-semibold">Meals</h2>
             <button
@@ -382,7 +375,6 @@ export default function NutritionPage() {
             </button>
           </div>
 
-          {/* Add Meal Modal */}
           {showAddMeal && (
             <div className="card mb-4">
               <div className="flex items-center justify-between mb-4">
@@ -392,7 +384,6 @@ export default function NutritionPage() {
                 </button>
               </div>
 
-              {/* Meal type selector */}
               <div className="flex gap-2 mb-4">
                 {MEAL_TYPES.map(type => {
                   const Icon = MEAL_ICONS[type];
@@ -413,7 +404,6 @@ export default function NutritionPage() {
                 })}
               </div>
 
-              {/* Food search */}
               <div className="relative mb-3">
                 <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
                 <input
@@ -440,7 +430,6 @@ export default function NutritionPage() {
                 )}
               </div>
 
-              {/* Quick add custom food */}
               <button
                 onClick={() => setShowCustomFood(!showCustomFood)}
                 className="text-xs text-violet-400 hover:text-violet-300 mb-3 flex items-center gap-1"
@@ -471,7 +460,6 @@ export default function NutritionPage() {
                 </div>
               )}
 
-              {/* Selected foods */}
               {selectedFoods.length > 0 && (
                 <div className="mb-3">
                   <p className="text-xs text-gray-500 mb-2">Foods ({selectedTotal.calories} cal total)</p>
@@ -507,7 +495,6 @@ export default function NutritionPage() {
             </div>
           )}
 
-          {/* Meal entries */}
           {meals.length === 0 ? (
             <div className="card text-center py-10">
               <Utensils size={36} className="text-gray-600 mx-auto mb-3" />
