@@ -53,7 +53,6 @@ export default function MeasurementsPage() {
   }, [loadEntries]);
 
   const handleLog = async () => {
-    // Check if at least one field has a value
     const hasValue = MEASUREMENT_FIELDS.some((f) => {
       const val = parseFloat(formValues[f.key] || "");
       return !isNaN(val) && val > 0;
@@ -103,7 +102,6 @@ export default function MeasurementsPage() {
       day: "numeric",
     });
 
-  // Chart data - filter entries that have the selected field, chronological order
   const chartEntries = [...entries]
     .filter((e) => {
       const val = e[chartField];
@@ -179,13 +177,11 @@ export default function MeasurementsPage() {
 
   return (
     <div className="px-4 pt-6 pb-4">
-      {/* Header */}
       <div className="mb-6">
         <h1 className="text-2xl font-bold">Measurements</h1>
         <p className="text-sm text-gray-400 mt-0.5">Track your body measurements over time</p>
       </div>
 
-      {/* Input Form */}
       <div className="card mb-6 space-y-3">
         <h2 className="text-sm font-semibold text-gray-400">Log Measurements (inches)</h2>
         <div className="grid grid-cols-2 gap-3">
@@ -220,7 +216,6 @@ export default function MeasurementsPage() {
         </button>
       </div>
 
-      {/* Trend Chart */}
       {chartEntries.length >= 2 && (
         <div className="card mb-6">
           <div className="flex items-center justify-between mb-3">
@@ -243,7 +238,6 @@ export default function MeasurementsPage() {
         </div>
       )}
 
-      {/* History */}
       <div className="space-y-2">
         <h2 className="text-sm font-semibold text-gray-400 mb-2">History</h2>
         {entries.length === 0 && (
