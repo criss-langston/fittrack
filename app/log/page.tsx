@@ -8,19 +8,13 @@ import {
   generateId,
 } from "@/lib/db";
 import { Trash2 } from "lucide-react";
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip,
-  Filler,
-} from "chart.js";
-import { Line } from "react-chartjs-2";
+import dynamic from "next/dynamic";
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Filler);
+// Dynamically import Chart.js component to keep it out of the initial bundle
+const WeightLineChart = dynamic(() => import("@/components/WeightLineChart"), {
+  loading: () => <div className="h-48 bg-gray-800 rounded-lg animate-pulse" />,
+  ssr: false,
+});
 
 interface WeightEntry {
   id: string;
@@ -37,8 +31,12 @@ export default function LogPage() {
   const [notes, setNotes] = useState("");
 
   const loadEntries = useCallback(async () => {
-    const data = await getWeightEntries();
-    setEntries(data as WeightEntry[]);
+    try {
+      const data = await getWeightEntries();
+      setEntries(data as WeightEntry[]);
+    } catch (err) {
+      console.error("Failed to load weight entries:", err);
+    }
   }, []);
 
   useEffect(() => {
@@ -55,16 +53,24 @@ export default function LogPage() {
       calories: calories ? parseInt(calories) : undefined,
       notes: notes.trim() || undefined,
     };
-    await addWeightEntry(entry);
-    setWeight("");
-    setCalories("");
-    setNotes("");
-    await loadEntries();
+    try {
+      await addWeightEntry(entry);
+      setWeight("");
+      setCalories("");
+      setNotes("");
+      await loadEntries();
+    } catch (err) {
+      console.error("Failed to save weight entry:", err);
+    }
   };
 
   const handleDelete = async (id: string) => {
-    await deleteWeightEntry(id);
-    await loadEntries();
+    try {
+      await deleteWeightEntry(id);
+      await loadEntries();
+    } catch (err) {
+      console.error("Failed to delete weight entry:", err);
+    }
   };
 
   const today = new Date().toLocaleDateString("en-US", {
@@ -73,63 +79,8 @@ export default function LogPage() {
     day: "numeric",
   });
 
-  const formatDate = (iso: string) =>
-    new Date(iso).toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-    });
-
   // Chart data — last 30 entries in chronological order
   const chartEntries = [...entries].reverse().slice(-30);
-  const chartData = {
-    labels: chartEntries.map((e) => formatDate(e.date)),
-    datasets: [
-      {
-        label: "Weight (lbs)",
-        data: chartEntries.map((e) => e.weight),
-        borderColor: "#8b5cf6",
-        backgroundColor: (context: { chart: ChartJS }) => {
-          const ctx = context.chart.ctx;
-          const gradient = ctx.createLinearGradient(0, 0, 0, 200);
-          gradient.addColorStop(0, "rgba(139, 92, 246, 0.3)");
-          gradient.addColorStop(1, "rgba(139, 92, 246, 0)");
-          return gradient;
-        },
-        fill: true,
-        tension: 0.4,
-        pointRadius: 3,
-        pointBackgroundColor: "#8b5cf6",
-        borderWidth: 2,
-      },
-    ],
-  };
-
-  const chartOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      title: { display: false },
-      tooltip: {
-        backgroundColor: "#1f2937",
-        titleColor: "#fff",
-        bodyColor: "#d1d5db",
-        borderColor: "#374151",
-        borderWidth: 1,
-        cornerRadius: 8,
-        padding: 10,
-      },
-    },
-    scales: {
-      x: {
-        ticks: { color: "#6b7280", font: { size: 10 } },
-        grid: { display: false },
-      },
-      y: {
-        ticks: { color: "#6b7280", font: { size: 10 } },
-        grid: { color: "rgba(75, 85, 99, 0.3)" },
-      },
-    },
-  } as const;
 
   return (
     <div className="px-4 pt-6">
@@ -182,7 +133,7 @@ export default function LogPage() {
         <div className="card mb-6">
           <h2 className="text-sm font-semibold text-gray-400 mb-3">Weight Trend</h2>
           <div className="h-48">
-            <Line data={chartData} options={chartOptions} />
+            <WeightLineChart entries={chartEntries} />
           </div>
         </div>
       )}
