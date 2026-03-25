@@ -2,10 +2,20 @@
 
 import { useState, useEffect } from "react";
 import { getWorkouts, getWeightEntries, getPersonalRecords, getCustomExercises, getDailyNutritionSummary } from "@/lib/db";
-import { Dumbbell, Scale, Trophy, Flame, Settings, Utensils } from "lucide-react";
+import { Dumbbell, Scale, Trophy, Flame, Settings, Utensils, AlertCircle } from "lucide-react";
 import Link from "next/link";
-import WorkoutHeatmap from "@/components/WorkoutHeatmap";
-import MuscleGroupChart from "@/components/MuscleGroupChart";
+import dynamic from "next/dynamic";
+
+// Lazy load heavy chart components (reduces initial bundle by ~60KB)
+const WorkoutHeatmap = dynamic(() => import("@/components/WorkoutHeatmap"), {
+  loading: () => <div className="h-24 bg-gray-800 rounded-lg animate-pulse" />,
+  ssr: false,
+});
+
+const MuscleGroupChart = dynamic(() => import("@/components/MuscleGroupChart"), {
+  loading: () => <div className="h-40 bg-gray-800 rounded-lg animate-pulse" />,
+  ssr: false,
+});
 
 interface WorkoutData {
   id: string;
@@ -49,64 +59,69 @@ export default function DashboardPage() {
   const [recentWorkouts, setRecentWorkouts] = useState<WorkoutData[]>([]);
   const [customExercises, setCustomExercises] = useState<CustomExercise[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
-      const [workouts, weightEntries, prs, customs, nutrition] = await Promise.all([
-        getWorkouts(),
-        getWeightEntries(1),
-        getPersonalRecords(),
-        getCustomExercises(),
-        getDailyNutritionSummary(getTodayISO()),
-      ]);
+      try {
+        const [workouts, weightEntries, prs, customs, nutrition] = await Promise.all([
+          getWorkouts(),
+          getWeightEntries(1),
+          getPersonalRecords(),
+          getCustomExercises(),
+          getDailyNutritionSummary(getTodayISO()),
+        ]);
 
-      setAllWorkouts(workouts as WorkoutData[]);
+        setAllWorkouts(workouts as WorkoutData[]);
 
-      // Filter workouts from last 7 days for muscle chart
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-      const recent = (workouts as WorkoutData[]).filter(
-        (w) => new Date(w.date) >= sevenDaysAgo
-      );
-      setRecentWorkouts(recent);
-      setCustomExercises(customs as CustomExercise[]);
+        // Filter workouts from last 7 days for muscle chart
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        const recent = (workouts as WorkoutData[]).filter(
+          (w) => new Date(w.date) >= sevenDaysAgo
+        );
+        setRecentWorkouts(recent);
+        setCustomExercises(customs as CustomExercise[]);
 
-      // Calculate streak
-      let streak = 0;
-      if (workouts.length > 0) {
-        const dates = [...new Set(
-          workouts.map((w) => new Date(w.date).toDateString())
-        )];
-        const today = new Date();
-        const todayStr = today.toDateString();
-        const yesterdayStr = new Date(Date.now() - 86400000).toDateString();
+        // Calculate streak
+        let streak = 0;
+        if (workouts.length > 0) {
+          const dates = [...new Set(
+            workouts.map((w) => new Date(w.date).toDateString())
+          )];
+          const today = new Date();
+          const todayStr = today.toDateString();
+          const yesterdayStr = new Date(Date.now() - 86400000).toDateString();
 
-        // Start from today or yesterday
-        if (dates.includes(todayStr) || dates.includes(yesterdayStr)) {
-          let checkDate = dates.includes(todayStr) ? today : new Date(Date.now() - 86400000);
-          while (dates.includes(checkDate.toDateString())) {
-            streak++;
-            checkDate = new Date(checkDate.getTime() - 86400000);
+          if (dates.includes(todayStr) || dates.includes(yesterdayStr)) {
+            let checkDate = dates.includes(todayStr) ? today : new Date(Date.now() - 86400000);
+            while (dates.includes(checkDate.toDateString())) {
+              streak++;
+              checkDate = new Date(checkDate.getTime() - 86400000);
+            }
           }
         }
+
+        const sortedPRs = prs.sort(
+          (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+        );
+
+        setStats({
+          latestWeight: weightEntries.length > 0 ? weightEntries[0].weight : null,
+          totalWorkouts: workouts.length,
+          streak,
+          latestPR: sortedPRs.length > 0
+            ? { exercise: sortedPRs[0].exercise, weight: sortedPRs[0].weight, reps: sortedPRs[0].reps }
+            : null,
+          todayCalories: nutrition.totalCalories,
+          todayProtein: nutrition.totalProtein,
+        });
+      } catch (err) {
+        console.error("Failed to load dashboard data:", err);
+        setError("Failed to load data. Please refresh the page.");
+      } finally {
+        setLoading(false);
       }
-
-      // Latest PR (sort by date desc)
-      const sortedPRs = prs.sort(
-        (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-      );
-
-      setStats({
-        latestWeight: weightEntries.length > 0 ? weightEntries[0].weight : null,
-        totalWorkouts: workouts.length,
-        streak,
-        latestPR: sortedPRs.length > 0
-          ? { exercise: sortedPRs[0].exercise, weight: sortedPRs[0].weight, reps: sortedPRs[0].reps }
-          : null,
-        todayCalories: nutrition.totalCalories,
-        todayProtein: nutrition.totalProtein,
-      });
-      setLoading(false);
     }
     load();
   }, []);
@@ -114,7 +129,8 @@ export default function DashboardPage() {
   const greeting = () => {
     const h = new Date().getHours();
     if (h < 12) return "Good morning";
-    return "Good afternoon";
+    if (h < 18) return "Good afternoon";
+    return "Good evening";
   };
 
   if (loading) {
@@ -127,7 +143,6 @@ export default function DashboardPage() {
 
   return (
     <div className="px-4 pt-6 pb-24 animate-fade-in">
-      {/* Header */}
       <div className="mb-6">
         <p className="text-sm text-gray-500 mb-1">{greeting()}</p>
         <div className="flex items-center justify-between">
@@ -141,7 +156,13 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Summary Cards */}
+      {error && (
+        <div className="mb-4 flex items-center gap-2 bg-red-900/30 border border-red-700/50 text-red-300 text-sm rounded-xl px-4 py-3">
+          <AlertCircle size={16} className="shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-3 mb-6">
         <div className="card">
           <div className="flex items-center gap-2 mb-2">
@@ -178,22 +199,17 @@ export default function DashboardPage() {
           </div>
           {stats.latestPR ? (
             <div>
-              <p className="text-2xl font-bold">
-                {stats.latestPR.weight} lbs
-              </p>
+              <p className="text-2xl font-bold">{stats.latestPR.weight} lbs</p>
               <p className="text-xs text-gray-500 mt-0.5">
                 {stats.latestPR.exercise} x{stats.latestPR.reps}
               </p>
             </div>
           ) : (
-            <div>
-              <p className="text-2xl font-bold">--</p>
-            </div>
+            <p className="text-2xl font-bold">--</p>
           )}
         </div>
       </div>
 
-      {/* Today's Nutrition */}
       <div className="card mb-4">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
@@ -214,23 +230,18 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Activity Heatmap */}
       <div className="card mb-4">
         <h2 className="text-base font-semibold mb-3">Activity</h2>
         <WorkoutHeatmap workouts={allWorkouts} />
       </div>
 
-      {/* Muscle Balance Chart */}
       {recentWorkouts.length > 0 && (
-        <>
-          <div className="card mb-4">
-            <h2 className="text-base font-semibold mb-3">Muscle Balance (7 Days)</h2>
-            <MuscleGroupChart workouts={recentWorkouts} customExercises={customExercises} />
-          </div>
-        </>
+        <div className="card mb-4">
+          <h2 className="text-base font-semibold mb-3">Muscle Balance (7 Days)</h2>
+          <MuscleGroupChart workouts={recentWorkouts} customExercises={customExercises} />
+        </div>
       )}
 
-      {/* Quick Actions */}
       <div className="card">
         <h2 className="text-base font-semibold mb-3">Quick Actions</h2>
         <div className="grid grid-cols-2 gap-2">
