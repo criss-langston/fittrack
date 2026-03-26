@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   addWorkout,
   getWorkouts,
@@ -13,6 +13,9 @@ import {
   getWorkoutTemplates,
   deleteWorkoutTemplate,
   getExerciseHistory,
+  getProgressiveOverloadSuggestion,
+  exportWorkoutsToCSV,
+  exportAllData,
   type WorkoutTemplate,
 } from "@/lib/db";
 import {
@@ -26,12 +29,15 @@ import {
   FolderOpen,
   Link,
   Unlink,
-  AlertTriangle,
+  Lightbulb,
   FileText,
   Activity,
+  Download,
+  Filter,
 } from "lucide-react";
 import RestTimer from "@/components/RestTimer";
 import Confetti from "@/components/Confetti";
+import FilterPanel from "@/components/FilterPanel";
 
 interface WorkoutSet {
   reps: number;
@@ -49,6 +55,7 @@ interface SupersetGroup {
 }
 
 interface Workout {
+  programId?: string;
   id: string;
   date: string;
   exercises: Exercise[];
@@ -56,6 +63,19 @@ interface Workout {
   notes?: string;
   rpe?: number;
   supersets?: SupersetGroup[];
+}
+
+interface OverloadSuggestion {
+  suggestion: string;
+  targetWeight: number;
+  targetReps: number;
+}
+
+interface FilterState {
+  searchText: string;
+  dateRange: { start: string; end: string };
+  exercises: string[];
+  sortBy: 'newest' | 'oldest' | 'duration' | 'weight';
 }
 
 const RPE_LABELS: Record<number, string> = {
@@ -85,6 +105,19 @@ function getRpeBarColor(rpe: number): string {
   return 'bg-red-500';
 }
 
+// Helper function to download file
+function downloadFile(content: string, filename: string, mimeType: string) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export default function WorkoutsPage() {
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [availableExercises, setAvailableExercises] = useState<string[]>([]);
@@ -94,7 +127,6 @@ export default function WorkoutsPage() {
   const [newPRs, setNewPRs] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [activeExIdx, setActiveExIdx] = useState<number | null>(null);
 
   // Workout-level notes + RPE
   const [workoutNotes, setWorkoutNotes] = useState("");
@@ -112,8 +144,8 @@ export default function WorkoutsPage() {
   const [restTimerSeconds, setRestTimerSeconds] = useState<number | undefined>(undefined);
   const [defaultRestTime] = useState(60);
 
-  // Progressive Overload
-  const [overloadAlerts, setOverloadAlerts] = useState<Record<string, boolean>>({});
+  // Progressive Overload Suggestions
+  const [overloadSuggestions, setOverloadSuggestions] = useState<Record<string, OverloadSuggestion>>({});
   const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
 
   // Supersets
@@ -123,6 +155,20 @@ export default function WorkoutsPage() {
 
   // PR Confetti
   const [confettiTrigger, setConfettiTrigger] = useState(false);
+
+  // Filters
+  const [filters, setFilters] = useState<FilterState>({
+    searchText: '',
+    dateRange: { start: '', end: '' },
+    exercises: [],
+    sortBy: 'newest',
+  });
+
+  // Export states
+  const [isExportingCsv, setIsExportingCsv] = useState(false);
+  const [isExportingJson, setIsExportingJson] = useState(false);
+  const [showExportDropdown, setShowExportDropdown] = useState(false);
+  const exportDropdownRef = useRef<HTMLDivElement>(null);
 
   const loadWorkouts = useCallback(async () => {
     const data = await getWorkouts();
@@ -145,32 +191,102 @@ export default function WorkoutsPage() {
     loadTemplates();
   }, [loadWorkouts, loadExerciseNames, loadTemplates]);
 
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (exportDropdownRef.current && !exportDropdownRef.current.contains(event.target as Node)) {
+        setShowExportDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   const checkOverload = useCallback(async (exerciseName: string) => {
     try {
-      const history = await getExerciseHistory(exerciseName, 3);
-      if (history.length < 3) return;
-      const sessions = history.map((h) => {
-        if (h.sets.length === 0) return null;
-        const maxWeight = Math.max(...h.sets.map((s) => s.weight));
-        const maxReps = Math.max(...h.sets.map((s) => s.reps));
-        return { weight: maxWeight, reps: maxReps };
-      }).filter(Boolean);
-      if (sessions.length < 3) return;
-      const allSame = sessions.every(
-        (s) => s && sessions[0] && s.weight === sessions[0].weight && s.reps === sessions[0].reps
-      );
-      if (allSame && sessions[0] && sessions[0].weight > 0) {
-        setOverloadAlerts((prev) => ({ ...prev, [exerciseName]: true }));
+      const history = await getExerciseHistory(exerciseName, 10);
+      const result = getProgressiveOverloadSuggestion(history);
+      if (result && history.length >= 3) {
+        setOverloadSuggestions((prev) => ({
+          ...prev,
+          [exerciseName]: {
+            suggestion: result.suggestion,
+            targetWeight: result.targetWeight,
+            targetReps: result.targetReps,
+          },
+        }));
       }
     } catch { /* silent */ }
   }, []);
+
+  // Filtered and sorted workouts
+  const filteredWorkouts = useMemo(() => {
+    let result = [...workouts];
+
+    // Apply search filter (searches exercise names, notes, programId)
+    if (filters.searchText) {
+      const searchLower = filters.searchText.toLowerCase();
+      result = result.filter((workout) => {
+        // Search in exercise names
+        const hasExerciseMatch = workout.exercises.some((ex) =>
+          ex.name.toLowerCase().includes(searchLower)
+        );
+        // Search in notes
+        const hasNotesMatch = workout.notes?.toLowerCase().includes(searchLower);
+        // Search in program ID (if present)
+        const hasProgramMatch = workout.programId?.toLowerCase().includes(searchLower);
+        return hasExerciseMatch || hasNotesMatch || hasProgramMatch;
+      });
+    }
+
+    // Apply date range filter
+    if (filters.dateRange.start) {
+      result = result.filter((w) => w.date >= filters.dateRange.start);
+    }
+    if (filters.dateRange.end) {
+      result = result.filter((w) => w.date <= filters.dateRange.end + 'T23:59:59');
+    }
+
+    // Apply exercise filter
+    if (filters.exercises.length > 0) {
+      result = result.filter((workout) =>
+        filters.exercises.some((filterEx) =>
+          workout.exercises.some((ex) => ex.name === filterEx)
+        )
+      );
+    }
+
+    // Apply sorting
+    switch (filters.sortBy) {
+      case 'oldest':
+        result.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        break;
+      case 'duration':
+        result.sort((a, b) => (b.duration || 0) - (a.duration || 0));
+        break;
+      case 'weight':
+        result.sort((a, b) => {
+          const maxA = Math.max(...a.exercises.flatMap(ex => ex.sets.map(s => s.weight)));
+          const maxB = Math.max(...b.exercises.flatMap(ex => ex.sets.map(s => s.weight)));
+          return maxB - maxA;
+        });
+        break;
+      case 'newest':
+      default:
+        result.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        break;
+    }
+
+    // Limit to 100 results for performance
+    return result.slice(0, 100);
+  }, [workouts, filters]);
 
   const startNewWorkout = () => {
     setIsNew(true);
     setExercises([]);
     setNewPRs([]);
     setSupersets([]);
-    setOverloadAlerts({});
+    setOverloadSuggestions({});
     setDismissedAlerts(new Set());
     setSupersetSelection(new Set());
     setShowSupersetSelect(false);
@@ -187,9 +303,8 @@ export default function WorkoutsPage() {
     setExercises([]);
     setSearchTerm("");
     setShowSuggestions(false);
-    setActiveExIdx(null);
     setSupersets([]);
-    setOverloadAlerts({});
+    setOverloadSuggestions({});
     setDismissedAlerts(new Set());
     setShowRestTimer(false);
     setConfettiTrigger(false);
@@ -206,7 +321,6 @@ export default function WorkoutsPage() {
     ]);
     setSearchTerm("");
     setShowSuggestions(false);
-    setActiveExIdx(null);
     checkOverload(name.trim());
   };
 
@@ -333,6 +447,7 @@ export default function WorkoutsPage() {
     const template: WorkoutTemplate = {
       id: generateId(),
       name: templateName.trim(),
+      description: "", // Could add a description field in the modal
       exercises: exercises.map((ex) => ({
         name: ex.name,
         sets: ex.sets.length,
@@ -419,9 +534,48 @@ export default function WorkoutsPage() {
   const formatDate = (iso: string) =>
     new Date(iso).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 
-  const filteredSuggestions = availableExercises.filter(
-    (e) => e.toLowerCase().includes(searchTerm.toLowerCase()) && !exercises.some((ex) => ex.name === e)
-  );
+  const filteredSuggestions = useMemo(() => {
+    if (!searchTerm.trim()) return [];
+    return availableExercises.filter(
+      (e) => e.toLowerCase().includes(searchTerm.toLowerCase()) && !exercises.some((ex) => ex.name === e)
+    );
+  }, [searchTerm, exercises, availableExercises]);
+
+  const handleFilterChange = (newFilters: typeof filters) => {
+    setFilters(newFilters);
+  };
+
+  // Export handlers
+  const handleExportCSV = async () => {
+    setIsExportingCsv(true);
+    try {
+      const allWorkouts = await getWorkouts();
+      const csv = exportWorkoutsToCSV(allWorkouts);
+      const timestamp = new Date().toISOString().split('T')[0];
+      downloadFile(csv, `workouts-export-${timestamp}.csv`, 'text/csv');
+      setShowExportDropdown(false);
+    } catch (error) {
+      console.error('Failed to export CSV:', error);
+      alert('Failed to export CSV. Please try again.');
+    } finally {
+      setIsExportingCsv(false);
+    }
+  };
+
+  const handleExportJSON = async () => {
+    setIsExportingJson(true);
+    try {
+      const backup = await exportAllData();
+      const timestamp = new Date().toISOString().split('T')[0];
+      downloadFile(JSON.stringify(backup, null, 2), `fittrack-backup-${timestamp}.json`, 'application/json');
+      setShowExportDropdown(false);
+    } catch (error) {
+      console.error('Failed to export JSON:', error);
+      alert('Failed to export JSON. Please try again.');
+    } finally {
+      setIsExportingJson(false);
+    }
+  };
 
   return (
     <div className="px-4 pt-6 pb-24">
@@ -446,12 +600,64 @@ export default function WorkoutsPage() {
             >
               <FolderOpen size={16} />From Template
             </button>
+            <div className="relative" ref={exportDropdownRef}>
+              <button
+                onClick={() => setShowExportDropdown(!showExportDropdown)}
+                className="btn-secondary flex items-center gap-1.5 text-sm !px-3 !py-2"
+                disabled={isExportingCsv || isExportingJson}
+              >
+                <Download size={16} />
+                Export
+                <ChevronDown size={14} />
+              </button>
+              {showExportDropdown && (
+                <div className="absolute top-full right-0 mt-1 w-48 bg-gray-800 border border-gray-700 rounded-lg shadow-lg z-10">
+                  <button
+                    onClick={handleExportCSV}
+                    disabled={isExportingCsv}
+                    className="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {isExportingCsv ? (
+                      <span className="flex items-center gap-2">
+                        <div className="w-4 h-4 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+                        Exporting...
+                      </span>
+                    ) : (
+                      "Export CSV (Workouts)"
+                    )}
+                  </button>
+                  <button
+                    onClick={handleExportJSON}
+                    disabled={isExportingJson}
+                    className="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors border-t border-gray-700"
+                  >
+                    {isExportingJson ? (
+                      <span className="flex items-center gap-2">
+                        <div className="w-4 h-4 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+                        Exporting...
+                      </span>
+                    ) : (
+                      "Export All JSON"
+                    )}
+                  </button>
+                </div>
+              )}
+            </div>
             <button onClick={startNewWorkout} className="btn-primary flex items-center gap-1.5 text-sm !px-3 !py-2">
               <Plus size={16} />New
             </button>
           </div>
         )}
       </div>
+
+      {/* Filter Panel */}
+      {!isNew && (
+        <FilterPanel
+          availableExercises={availableExercises}
+          onFilterChange={handleFilterChange}
+          initialFilters={filters}
+        />
+      )}
 
       {/* Template Selection Modal */}
       {showTemplateModal && (
@@ -516,24 +722,34 @@ export default function WorkoutsPage() {
             <button onClick={cancelWorkout} className="text-gray-400 hover:text-white"><X size={20} /></button>
           </div>
 
-          {/* Exercise search */}
+          {/* Exercise search with persistent search terms */}
           <div className="relative mb-4">
             <input
               className="input-field pr-10"
               placeholder="Search or type exercise name..."
               value={searchTerm}
-              onChange={(e) => { setSearchTerm(e.target.value); setShowSuggestions(true); }}
+              onChange={(e) => { 
+                setSearchTerm(e.target.value);
+                setShowSuggestions(true);
+              }}
               onFocus={() => setShowSuggestions(true)}
-              onKeyDown={(e) => { if (e.key === "Enter" && searchTerm.trim()) addExercise(searchTerm); }}
+              onKeyDown={(e) => { 
+                if (e.key === "Enter" && searchTerm.trim()) {
+                  addExercise(searchTerm);
+                }
+              }}
             />
-            {showSuggestions && searchTerm && filteredSuggestions.length > 0 && (
-              <div className="absolute top-full left-0 right-0 z-10 bg-gray-800 border border-gray-700 rounded-lg mt-1 max-h-48 overflow-y-auto">
+            {showSuggestions && filteredSuggestions.length > 0 && (
+              <div className="absolute top-full left-0 right-0 z-10 bg-gray-800 border border-gray-700 rounded-lg mt-1 max-h-60 overflow-y-auto shadow-lg">
+                <div className="p-2 bg-gray-700/50 border-b border-gray-600 text-xs text-gray-400">
+                  {filteredSuggestions.length} exercises found
+                </div>
                 {filteredSuggestions.map((name) => (
                   <button
                     key={name}
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => addExercise(name)}
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-gray-700 transition-colors"
+                    className="w-full text-left px-3 py-2.5 text-sm hover:bg-gray-700 transition-colors"
                   >
                     {name}
                   </button>
@@ -541,6 +757,19 @@ export default function WorkoutsPage() {
               </div>
             )}
           </div>
+
+          {/* Clear search button */}
+          {searchTerm && (
+            <button
+              onClick={() => {
+                setSearchTerm("");
+                setShowSuggestions(false);
+              }}
+              className="text-xs text-gray-500 hover:text-gray-400 mb-2"
+            >
+              <X size={14} /> Clear search
+            </button>
+          )}
 
           {/* Superset controls */}
           {exercises.length >= 2 && (
@@ -575,7 +804,7 @@ export default function WorkoutsPage() {
                   <span>{getSupersetLabel(sg)}: {sg.exerciseIndices.map((i) => exercises[i]?.name || "?").join(" + ")}</span>
                   <button onClick={() => removeSuperset(gi)} className="text-gray-500 hover:text-red-400 ml-auto"><X size={12} /></button>
                 </div>
-              ))}
+              ))
             </div>
           )}
 
@@ -585,6 +814,7 @@ export default function WorkoutsPage() {
             const borderColor = sgInfo ? getSupersetColor(sgInfo.groupIdx) : "border-transparent";
             const isFirstInGroup = sgInfo ? sgInfo.group.exerciseIndices[0] === exIdx : false;
             const isLastInGroup = sgInfo ? sgInfo.group.exerciseIndices[sgInfo.group.exerciseIndices.length - 1] === exIdx : false;
+            const suggestion = overloadSuggestions[ex.name];
 
             return (
               <div key={exIdx} className="relative">
@@ -607,17 +837,24 @@ export default function WorkoutsPage() {
                     </button>
                   )}
 
-                  <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center justify-between mb-2">
                     <h3 className="font-semibold">{ex.name}</h3>
-                    {overloadAlerts[ex.name] && !dismissedAlerts.has(ex.name) && (
-                      <div className="flex items-center gap-1 text-xs text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full">
-                        <AlertTriangle size={12} />
-                        <span>&#x2191; Try increasing weight</span>
-                        <button onClick={() => setDismissedAlerts((prev) => new Set(prev).add(ex.name))} className="text-amber-600 hover:text-amber-400 ml-0.5"><X size={10} /></button>
-                      </div>
-                    )}
                     <button onClick={() => removeExercise(exIdx)} className="text-gray-500 hover:text-red-400 flex-shrink-0 ml-2"><X size={18} /></button>
                   </div>
+
+                  {/* Progressive Overload Suggestion */}
+                  {suggestion && !dismissedAlerts.has(ex.name) && (
+                    <div className="flex items-start gap-2 text-xs bg-violet-500/10 border border-violet-500/20 rounded-lg px-3 py-2 mb-3">
+                      <Lightbulb size={14} className="text-amber-400 flex-shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <p className="text-violet-200">{suggestion.suggestion}</p>
+                        <div className="flex gap-3 mt-1">
+                          <span className="text-gray-400">Target: <span className="text-violet-300 font-medium">{suggestion.targetWeight}lbs x {suggestion.targetReps}</span></span>
+                        </div>
+                      </div>
+                      <button onClick={() => setDismissedAlerts((prev) => new Set(prev).add(ex.name))} className="text-gray-500 hover:text-gray-300 flex-shrink-0"><X size={12} /></button>
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-[28px_1fr_1fr_28px] gap-2 mb-2 text-xs text-gray-500 px-1">
                     <span>Set</span><span>Weight (lbs)</span><span>Reps</span><span></span>
@@ -673,7 +910,7 @@ export default function WorkoutsPage() {
               className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-200 transition-colors w-full"
             >
               <FileText size={15} />
-              <span>Notes &amp; RPE</span>
+              <span>Notes & RPE</span>
               {workoutRpe > 0 && (
                 <span className={`ml-auto text-xs font-semibold ${getRpeColor(workoutRpe)}`}>
                   RPE {workoutRpe}
@@ -692,6 +929,7 @@ export default function WorkoutsPage() {
                     placeholder="How did it go? Any cues, observations, or goals for next time..."
                     value={workoutNotes}
                     onChange={(e) => setWorkoutNotes(e.target.value)}
+                    maxLength={500}
                   />
                 </div>
 
@@ -699,17 +937,17 @@ export default function WorkoutsPage() {
                   <div className="flex items-center justify-between mb-2">
                     <label className="text-xs text-gray-400">Rate of Perceived Exertion (RPE)</label>
                     <span className={`text-sm font-bold ${getRpeColor(workoutRpe)}`}>
-                      {workoutRpe} &#x2014; {RPE_LABELS[workoutRpe]}
+                      {workoutRpe} — {RPE_LABELS[workoutRpe]}
                     </span>
                   </div>
                   <input
                     type="range"
                     min={1}
                     max={10}
-                    step={1}
                     value={workoutRpe}
                     onChange={(e) => setWorkoutRpe(Number(e.target.value))}
                     className="w-full h-2 rounded-full appearance-none cursor-pointer bg-gray-700"
+                    step={1}
                   />
                   <div className="flex justify-between mt-1">
                     {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
@@ -757,11 +995,19 @@ export default function WorkoutsPage() {
           <div className="card text-center py-10">
             <Activity size={36} className="text-gray-600 mx-auto mb-3" />
             <p className="text-gray-400 font-medium">No workouts yet</p>
-            <p className="text-gray-600 text-sm mt-1">Tap &quot;New&quot; to log your first workout</p>
+            <p className="text-gray-600 text-sm mt-1">Tap "New" to log your first workout</p>
           </div>
         )}
 
-        {workouts.map((w) => (
+        {filteredWorkouts.length === 0 && workouts.length > 0 && (
+          <div className="card text-center py-10">
+            <Filter size={36} className="text-gray-600 mx-auto mb-3" />
+            <p className="text-gray-400 font-medium">No workouts found</p>
+            <p className="text-gray-600 text-sm mt-1">Try adjusting your filters to see more results</p>
+          </div>
+        )}
+
+        {filteredWorkouts.map((w) => (
           <div key={w.id} className="card">
             <div
               className="flex items-center justify-between cursor-pointer"
@@ -771,7 +1017,7 @@ export default function WorkoutsPage() {
                 <p className="font-semibold">{formatDate(w.date)}</p>
                 <p className="text-sm text-gray-400">
                   {w.exercises.length} exercise{w.exercises.length !== 1 ? "s" : ""}
-                  {calcVolume(w.exercises) > 0 && ` \u00b7 ${calcVolume(w.exercises).toLocaleString()} lbs`}
+                  {calcVolume(w.exercises) > 0 && ` · ${calcVolume(w.exercises).toLocaleString()} lbs`}
                   {w.rpe !== undefined && (
                     <span className={`ml-2 font-medium ${getRpeColor(w.rpe)}`}>
                       RPE {w.rpe}
@@ -787,6 +1033,7 @@ export default function WorkoutsPage() {
                   <Trash2 size={16} />
                 </button>
                 {expandedId === w.id ? <ChevronUp size={18} className="text-gray-400" /> : <ChevronDown size={18} className="text-gray-400" />}
+Workout</div>
               </div>
             </div>
 
@@ -804,7 +1051,7 @@ export default function WorkoutsPage() {
                     <div className="flex flex-wrap gap-1.5 mt-1">
                       {ex.sets.filter((s) => s.completed).map((s, si) => (
                         <span key={si} className="text-xs bg-gray-800 text-gray-400 px-2 py-0.5 rounded">
-                          {s.weight}lbs \u00d7 {s.reps}
+                          {s.weight}lbs × {s.reps}
                         </span>
                       ))}
                     </div>
