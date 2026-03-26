@@ -10,7 +10,6 @@ export enum HealthDataSource {
   MANUAL = 'manual',
 }
 
-/** Sync status for a connected data source */
 export enum SyncStatus {
   CONNECTED = 'connected',
   DISCONNECTED = 'disconnected',
@@ -19,7 +18,6 @@ export enum SyncStatus {
   ERROR = 'error',
 }
 
-/** Sync configuration - what data types to sync */
 export interface SyncPreferences {
   steps: boolean;
   workouts: boolean;
@@ -30,83 +28,76 @@ export interface SyncPreferences {
   distance: boolean;
 }
 
-/** Step count data from wearable */
 export interface StepData {
   id: string;
   source: HealthDataSource;
-  date: string; // YYYY-MM-DD
+  date: string;
   type: 'steps';
   steps: number;
-  distance?: number; // meters
+  distance?: number;
   calories?: number;
-  syncedAt: string; // ISO timestamp
+  syncedAt: string;
 }
 
-/** Heart rate data */
 export interface HeartRateData {
   id: string;
   source: HealthDataSource;
-  date: string; // YYYY-MM-DD
+  date: string;
   type: 'heartRate' | 'restingHR';
-  timestamp: string; // ISO timestamp for specific measurement
+  timestamp: string;
   bpm: number;
   resting?: boolean;
   syncedAt: string;
 }
 
-/** Heart rate zone information */
 export interface HeartRateZone {
-  zone: number; // 1-5
-  name: string; // 'Fat Burn', 'Cardio', etc.
+  zone: number;
+  name: string;
   minBpm: number;
   maxBpm: number;
   timeInZoneSeconds: number;
 }
 
-/** Workout session from wearable */
 export interface HealthWorkout {
   id: string;
   source: HealthDataSource;
-  externalId: string; // ID from the source API
-  date: string; // YYYY-MM-DD
-  startTime: string; // ISO timestamp
-  endTime: string; // ISO timestamp
-  duration: number; // milliseconds
-  type: string; // e.g., 'running', 'cycling', 'strength'
+  externalId: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  duration: number;
+  type: string;
   calories?: number;
-  distance?: number; // meters
+  distance?: number;
   heartRateAvg?: number;
   heartRateMax?: number;
   heartRateZones?: HeartRateZone[];
   syncedAt: string;
-  mappedExerciseName?: string; // matched FitTrack exercise
+  mappedExerciseName?: string;
 }
 
-/** Sleep stage breakdown */
 export interface SleepStage {
   type: 'awake' | 'light' | 'deep' | 'rem';
-  duration: number; // seconds
+  duration: number;
   startTime: string;
   endTime: string;
 }
 
-/** Sleep data */
 export interface SleepData {
   id: string;
   source: HealthDataSource;
-  date: string; // YYYY-MM-DD
+  date: string;
   type: 'sleep';
-  startTime: string; // ISO
-  endTime: string; // ISO
-  duration: number; // seconds
+  startTime: string;
+  endTime: string;
+  duration: number;
   quality?: 'low' | 'medium' | 'high';
   stages?: SleepStage[];
   syncedAt: string;
 }
 
-/** User's health settings */
 export interface HealthSettings {
-  key?: string; // IDB key field
+  key?: string;
   enabled: boolean;
   syncEnabled?: boolean;
   syncPreferences: SyncPreferences;
@@ -128,7 +119,6 @@ export interface HealthSettings {
   };
 }
 
-/** Sync history entry */
 export interface SyncHistory {
   id: string;
   source: HealthDataSource;
@@ -144,7 +134,6 @@ export interface SyncHistory {
   errors?: string[];
 }
 
-/** Default health settings */
 export const DEFAULT_HEALTH_SETTINGS: HealthSettings = {
   key: 'settings',
   enabled: false,
