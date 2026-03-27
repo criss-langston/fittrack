@@ -169,3 +169,35 @@ export const DEFAULT_HEALTH_SETTINGS: HealthSettings = {
     weight: 'metric',
   },
 };
+
+// ============================================
+// PHASE TRACKER TYPES
+// ============================================
+
+export enum PhaseType {
+  BULK = 'bulk',
+  CUT = 'cut',
+  MAINTENANCE = 'maintenance'
+}
+
+export interface FitnessPhase {
+  id?: IDBValidKey;
+  type: PhaseType;
+  startDate: string; // ISO 8601 date string
+  endDate?: string; // null = ongoing phase
+  dailyCalorieTarget?: number;
+  dailyProteinTarget?: number;
+  notes?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface PhaseProgress {
+  phaseId: IDBValidKey;
+  date: string; // YYYY-MM-DD
+  weightChange?: number; // kg/lbs change since phase start
+  calorieAdherence?: number; // percentage (0-100)
+  workoutAdherence?: number; // percentage (0-100)
+  notes?: string;
+  createdAt: number;
+}
