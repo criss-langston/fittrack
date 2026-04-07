@@ -154,6 +154,7 @@ export interface FitnessPhase {
   type: PhaseType;
   startDate: string;
   endDate: string;
+  parentPhaseId?: string | null;
   description?: string;
   createdAt: string;
   updatedAt: string;
