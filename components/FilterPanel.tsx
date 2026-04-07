@@ -42,8 +42,10 @@ export default function FilterPanel({ availableExercises, onFilterChange, initia
       if (saved) {
         const parsed = JSON.parse(saved) as FilterState;
         setLocalFilters({ ...DEFAULT_FILTERS, ...parsed, ...initialFilters });
+        return;
       }
     } catch (e) { }
+    setLocalFilters({ ...DEFAULT_FILTERS, ...initialFilters });
   }, [initialFilters]);
 
   useEffect(() => {

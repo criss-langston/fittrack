@@ -1,31 +1,5 @@
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
 
-// ==================== RE-EXPORT ALL HEALTH TYPES FROM SINGLE SOURCE OF TRUTH ====================
-export type {
-  SyncPreferences,
-  StepData,
-  HeartRateData,
-  HealthWorkout,
-  HeartRateZone,
-  SleepData,
-  HealthSettings,
-  SyncHistory,
-} from '@/types/health';
-export { HealthDataSource, SyncStatus, DEFAULT_HEALTH_SETTINGS } from '@/types/health';
-
-// Import locally for use in this file
-import {
-  HealthDataSource,
-  SyncStatus,
-  DEFAULT_HEALTH_SETTINGS,
-  HealthSettings,
-  StepData,
-  HeartRateData,
-  HealthWorkout,
-  SleepData,
-  SyncHistory,
-} from '@/types/health';
-
 export const COMMON_EXERCISES = [
   "Bench Press","Squat","Deadlift","Overhead Press","Barbell Row",
   "Pull Up","Lat Pulldown","Leg Press","Romanian Deadlift","Incline Bench Press",
@@ -123,6 +97,42 @@ export interface Workout {
   supersets?: { exerciseIndices: number[] }[];
 }
 
+export interface WorkoutTemplate {
+  id: string;
+  name: string;
+  description?: string;
+  exercises: { name: string; sets: number; reps: number }[];
+  createdAt: string;
+}
+
+export interface Measurement {
+  id: string;
+  date: string;
+  chest?: number;
+  waist?: number;
+  hips?: number;
+  bicepLeft?: number;
+  bicepRight?: number;
+  thighLeft?: number;
+  thighRight?: number;
+  neck?: number;
+  bodyFat?: number;
+  notes?: string;
+}
+
+export type PhaseType = 'bulk' | 'cut' | 'maintenance';
+
+export interface FitnessPhase {
+  id: string;
+  name: string;
+  type: PhaseType;
+  startDate: string;
+  endDate: string;
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export function epley1RM(weight: number, reps: number): number {
   if (reps <= 0) return 0;
   if (reps === 1) return weight;
@@ -183,22 +193,19 @@ interface FitTrackDB extends DBSchema {
   programs: { key: string; value: { id: string; name: string; description?: string; days: { name: string; exercises: { name: string; sets: number; reps: string; restSeconds?: number }[] }[]; isActive: boolean; createdAt: string } };
   personalRecords: { key: string; value: { id: string; exercise: string; weight: number; reps: number; date: string }; indexes: { 'by-exercise': string } };
   customExercises: { key: string; value: { id: string; name: string; category: 'machine' | 'cable' | 'barbell' | 'dumbbell' | 'bodyweight' | 'other'; muscleGroup: string; specificMuscles?: string[]; notes?: string; createdAt: string }; indexes: { 'by-category': string; 'by-muscle': string } };
-  workoutTemplates: { key: string; value: { id: string; name: string; exercises: { name: string; sets: number; reps: number }[]; createdAt: string } };
-  measurements: { key: string; value: { id: string; date: string; chest?: number; waist?: number; hips?: number; bicepLeft?: number; bicepRight?: number; thighLeft?: number; thighRight?: number; neck?: number; notes?: string }; indexes: { 'by-date': string } };
+  workoutTemplates: { key: string; value: WorkoutTemplate };
+  measurements: { key: string; value: Measurement; indexes: { 'by-date': string } };
   meals: { key: string; value: Meal; indexes: { 'by-date': string; 'by-mealType': string } };
   foods: { key: string; value: FoodItem; indexes: { 'by-name': string } };
   userProfile: { key: string; value: UserProfile; indexes: { 'by-lastUpdated': string } };
-  healthMetrics: { key: string; value: StepData | HeartRateData | SleepData; indexes: { 'by-date': string; 'by-type': string; 'by-source': string } };
-  healthWorkouts: { key: string; value: HealthWorkout; indexes: { 'by-date': string; 'by-source': string; 'by-externalId': string } };
-  healthSyncHistory: { key: string; value: SyncHistory; indexes: { 'by-timestamp': string; 'by-source': string } };
-  healthSettings: { key: string; value: HealthSettings };
+  phases: { key: string; value: FitnessPhase; indexes: { 'by-startDate': string; 'by-endDate': string; 'by-type': string } };
 }
 
 let dbPromise: Promise<IDBPDatabase<FitTrackDB>> | null = null;
 
 export function getDB(): Promise<IDBPDatabase<FitTrackDB>> {
   if (!dbPromise) {
-    dbPromise = openDB<FitTrackDB>('fittrack', 7, {
+    dbPromise = openDB<FitTrackDB>('fittrack', 9, {
       upgrade(db, oldVersion) {
         if (oldVersion < 1) {
           const workoutStore = db.createObjectStore('workouts', { keyPath: 'id' });
@@ -228,23 +235,23 @@ export function getDB(): Promise<IDBPDatabase<FitTrackDB>> {
           const foodStore = db.createObjectStore('foods', { keyPath: 'id' });
           foodStore.createIndex('by-name', 'name');
         }
-        if (oldVersion < 6) {
-          const healthMetricsStore = db.createObjectStore('healthMetrics', { keyPath: 'id' });
-          healthMetricsStore.createIndex('by-date', 'date');
-          healthMetricsStore.createIndex('by-type', 'type');
-          healthMetricsStore.createIndex('by-source', 'source');
-          const healthWorkoutsStore = db.createObjectStore('healthWorkouts', { keyPath: 'id' });
-          healthWorkoutsStore.createIndex('by-date', 'date');
-          healthWorkoutsStore.createIndex('by-source', 'source');
-          healthWorkoutsStore.createIndex('by-externalId', 'externalId');
-          const syncHistoryStore = db.createObjectStore('healthSyncHistory', { keyPath: 'id' });
-          syncHistoryStore.createIndex('by-timestamp', 'timestamp');
-          syncHistoryStore.createIndex('by-source', 'source');
-          db.createObjectStore('healthSettings', { keyPath: 'key' });
-        }
         if (oldVersion < 7) {
           const userProfileStore = db.createObjectStore('userProfile', { keyPath: 'id' });
           userProfileStore.createIndex('by-lastUpdated', 'lastUpdated');
+        }
+        if (oldVersion < 8) {
+          const legacyStores = ['healthMetrics', 'healthWorkouts', 'healthSyncHistory', 'healthSettings'] as const;
+          for (const storeName of legacyStores) {
+            if ((db.objectStoreNames as DOMStringList).contains(storeName)) {
+              (db as unknown as IDBDatabase).deleteObjectStore(storeName);
+            }
+          }
+        }
+        if (oldVersion < 9) {
+          const phaseStore = db.createObjectStore('phases', { keyPath: 'id' });
+          phaseStore.createIndex('by-startDate', 'startDate');
+          phaseStore.createIndex('by-endDate', 'endDate');
+          phaseStore.createIndex('by-type', 'type');
         }
       },
     });
@@ -252,112 +259,34 @@ export function getDB(): Promise<IDBPDatabase<FitTrackDB>> {
   return dbPromise;
 }
 
-export async function addWorkout(workout: Workout) {
-  const db = await getDB();
-  await db.put('workouts', workout);
-}
+export async function addWorkout(workout: Workout) { const db = await getDB(); await db.put('workouts', workout); }
+export async function getWorkouts(limit?: number): Promise<Workout[]> { const db = await getDB(); const all = await db.getAllFromIndex('workouts', 'by-date'); const sorted = all.reverse(); return limit ? sorted.slice(0, limit) : sorted; }
+export async function deleteWorkout(id: string) { const db = await getDB(); await db.delete('workouts', id); }
 
-export async function getWorkouts(limit?: number): Promise<Workout[]> {
-  const db = await getDB();
-  const all = await db.getAllFromIndex('workouts', 'by-date');
-  const sorted = all.reverse();
-  return limit ? sorted.slice(0, limit) : sorted;
-}
+export async function addWeightEntry(entry: FitTrackDB['weightLog']['value']) { const db = await getDB(); await db.put('weightLog', entry); }
+export async function getWeightEntries(limit?: number) { const db = await getDB(); const all = await db.getAllFromIndex('weightLog', 'by-date'); const sorted = all.reverse(); return limit ? sorted.slice(0, limit) : sorted; }
+export async function deleteWeightEntry(id: string) { const db = await getDB(); await db.delete('weightLog', id); }
 
-export async function deleteWorkout(id: string) {
-  const db = await getDB();
-  await db.delete('workouts', id);
-}
+export async function addPhoto(photo: FitTrackDB['photos']['value']) { const db = await getDB(); await db.put('photos', photo); }
+export async function getPhotos() { const db = await getDB(); const all = await db.getAllFromIndex('photos', 'by-date'); return all.reverse(); }
+export async function deletePhoto(id: string) { const db = await getDB(); await db.delete('photos', id); }
 
-export async function addWeightEntry(entry: FitTrackDB['weightLog']['value']) {
-  const db = await getDB();
-  await db.put('weightLog', entry);
-}
-
-export async function getWeightEntries(limit?: number) {
-  const db = await getDB();
-  const all = await db.getAllFromIndex('weightLog', 'by-date');
-  const sorted = all.reverse();
-  return limit ? sorted.slice(0, limit) : sorted;
-}
-
-export async function deleteWeightEntry(id: string) {
-  const db = await getDB();
-  await db.delete('weightLog', id);
-}
-
-export async function addPhoto(photo: FitTrackDB['photos']['value']) {
-  const db = await getDB();
-  await db.put('photos', photo);
-}
-
-export async function getPhotos() {
-  const db = await getDB();
-  const all = await db.getAllFromIndex('photos', 'by-date');
-  return all.reverse();
-}
-
-export async function deletePhoto(id: string) {
-  const db = await getDB();
-  await db.delete('photos', id);
-}
-
-export async function addProgram(program: FitTrackDB['programs']['value']) {
-  const db = await getDB();
-  await db.put('programs', program);
-}
-
-export async function getPrograms() {
-  const db = await getDB();
-  return db.getAll('programs');
-}
-
-export async function getProgram(id: string) {
-  const db = await getDB();
-  return db.get('programs', id);
-}
-
-export async function deleteProgram(id: string) {
-  const db = await getDB();
-  await db.delete('programs', id);
-}
-
+export async function addProgram(program: FitTrackDB['programs']['value']) { const db = await getDB(); await db.put('programs', program); }
+export async function getPrograms() { const db = await getDB(); return db.getAll('programs'); }
+export async function getProgram(id: string) { const db = await getDB(); return db.get('programs', id); }
+export async function deleteProgram(id: string) { const db = await getDB(); await db.delete('programs', id); }
 export async function setActiveProgram(id: string) {
   const db = await getDB();
   const programs = await db.getAll('programs');
-  for (const p of programs) {
-    p.isActive = p.id === id;
-    await db.put('programs', p);
-  }
+  for (const p of programs) { p.isActive = p.id === id; await db.put('programs', p); }
 }
 
-export async function addPersonalRecord(pr: FitTrackDB['personalRecords']['value']) {
-  const db = await getDB();
-  await db.put('personalRecords', pr);
-}
+export async function addPersonalRecord(pr: FitTrackDB['personalRecords']['value']) { const db = await getDB(); await db.put('personalRecords', pr); }
+export async function getPersonalRecords(exercise?: string) { const db = await getDB(); if (exercise) return db.getAllFromIndex('personalRecords', 'by-exercise', exercise); return db.getAll('personalRecords'); }
 
-export async function getPersonalRecords(exercise?: string) {
-  const db = await getDB();
-  if (exercise) return db.getAllFromIndex('personalRecords', 'by-exercise', exercise);
-  return db.getAll('personalRecords');
-}
-
-export async function addCustomExercise(exercise: FitTrackDB['customExercises']['value']) {
-  const db = await getDB();
-  await db.put('customExercises', exercise);
-}
-
-export async function getCustomExercises(category?: string) {
-  const db = await getDB();
-  if (category) return db.getAllFromIndex('customExercises', 'by-category', category);
-  return db.getAll('customExercises');
-}
-
-export async function deleteCustomExercise(id: string) {
-  const db = await getDB();
-  await db.delete('customExercises', id);
-}
-
+export async function addCustomExercise(exercise: FitTrackDB['customExercises']['value']) { const db = await getDB(); await db.put('customExercises', exercise); }
+export async function getCustomExercises(category?: string) { const db = await getDB(); if (category) return db.getAllFromIndex('customExercises', 'by-category', category); return db.getAll('customExercises'); }
+export async function deleteCustomExercise(id: string) { const db = await getDB(); await db.delete('customExercises', id); }
 export async function getAllExerciseNames(): Promise<string[]> {
   const custom = await getCustomExercises();
   const customNames = custom.map((e) => e.name);
@@ -365,83 +294,18 @@ export async function getAllExerciseNames(): Promise<string[]> {
   return Array.from(new Set(merged)).sort((a, b) => a.localeCompare(b));
 }
 
-export interface WorkoutTemplate {
-  id: string;
-  name: string;
-  description?: string;
-  exercises: { name: string; sets: number; reps: number }[];
-  createdAt: string;
-}
+export async function addWorkoutTemplate(template: WorkoutTemplate) { const db = await getDB(); await db.put('workoutTemplates', template); }
+export async function getWorkoutTemplates(): Promise<WorkoutTemplate[]> { const db = await getDB(); return db.getAll('workoutTemplates'); }
+export async function deleteWorkoutTemplate(id: string) { const db = await getDB(); await db.delete('workoutTemplates', id); }
 
-export async function addWorkoutTemplate(template: WorkoutTemplate) {
-  const db = await getDB();
-  await db.put('workoutTemplates', template);
-}
+export async function addMeasurement(measurement: Measurement) { const db = await getDB(); await db.put('measurements', measurement); }
+export async function getMeasurements(limit?: number): Promise<Measurement[]> { const db = await getDB(); const all = await db.getAllFromIndex('measurements', 'by-date'); const sorted = all.reverse(); return limit ? sorted.slice(0, limit) : sorted; }
+export async function deleteMeasurement(id: string) { const db = await getDB(); await db.delete('measurements', id); }
 
-export async function getWorkoutTemplates(): Promise<WorkoutTemplate[]> {
-  const db = await getDB();
-  return db.getAll('workoutTemplates');
-}
-
-export async function deleteWorkoutTemplate(id: string) {
-  const db = await getDB();
-  await db.delete('workoutTemplates', id);
-}
-
-export interface Measurement {
-  id: string;
-  date: string;
-  chest?: number;
-  waist?: number;
-  hips?: number;
-  bicepLeft?: number;
-  bicepRight?: number;
-  thighLeft?: number;
-  thighRight?: number;
-  neck?: number;
-  notes?: string;
-}
-
-export async function addMeasurement(measurement: Measurement) {
-  const db = await getDB();
-  await db.put('measurements', measurement);
-}
-
-export async function getMeasurements(limit?: number): Promise<Measurement[]> {
-  const db = await getDB();
-  const all = await db.getAllFromIndex('measurements', 'by-date');
-  const sorted = all.reverse();
-  return limit ? sorted.slice(0, limit) : sorted;
-}
-
-export async function deleteMeasurement(id: string) {
-  const db = await getDB();
-  await db.delete('measurements', id);
-}
-
-export async function addMeal(meal: Meal) {
-  const db = await getDB();
-  await db.put('meals', meal);
-}
-
-export async function getMeals(date?: string): Promise<Meal[]> {
-  const db = await getDB();
-  if (date) return db.getAllFromIndex('meals', 'by-date', date);
-  const all = await db.getAllFromIndex('meals', 'by-date');
-  return all.reverse();
-}
-
-export async function getMealsForDateRange(startDate: string, endDate: string): Promise<Meal[]> {
-  const db = await getDB();
-  const all = await db.getAllFromIndex('meals', 'by-date');
-  return all.filter(m => m.date >= startDate && m.date <= endDate).reverse();
-}
-
-export async function deleteMeal(id: string) {
-  const db = await getDB();
-  await db.delete('meals', id);
-}
-
+export async function addMeal(meal: Meal) { const db = await getDB(); await db.put('meals', meal); }
+export async function getMeals(date?: string): Promise<Meal[]> { const db = await getDB(); if (date) return db.getAllFromIndex('meals', 'by-date', date); const all = await db.getAllFromIndex('meals', 'by-date'); return all.reverse(); }
+export async function getMealsForDateRange(startDate: string, endDate: string): Promise<Meal[]> { const db = await getDB(); const all = await db.getAllFromIndex('meals', 'by-date'); return all.filter(m => m.date >= startDate && m.date <= endDate).reverse(); }
+export async function deleteMeal(id: string) { const db = await getDB(); await db.delete('meals', id); }
 export async function getDailyNutritionSummary(date: string): Promise<{ totalCalories: number; totalProtein: number; totalCarbs: number; totalFat: number; mealCount: number; byMealType: Record<string, { calories: number; protein: number; carbs: number; fat: number }> }> {
   const meals = await getMeals(date);
   const byMealType: Record<string, { calories: number; protein: number; carbs: number; fat: number }> = {};
@@ -473,116 +337,37 @@ const COMMON_FOODS: FoodItem[] = [
   { id: 'common-15', name: 'Peanut Butter (2 tbsp)', calories: 190, protein: 7, carbs: 7, fat: 16, servingSize: '2 tbsp', isCustom: false, createdAt: '' },
 ];
 
-export async function addFoodItem(food: FoodItem) {
-  const db = await getDB();
-  await db.put('foods', food);
-}
+export async function addFoodItem(food: FoodItem) { const db = await getDB(); await db.put('foods', food); }
+export async function getFoodItems(): Promise<FoodItem[]> { const db = await getDB(); const custom = await db.getAll('foods'); return [...COMMON_FOODS, ...custom].sort((a, b) => a.name.localeCompare(b.name)); }
+export async function deleteFoodItem(id: string) { const db = await getDB(); await db.delete('foods', id); }
+export async function searchFoods(query: string): Promise<FoodItem[]> { const all = await getFoodItems(); const lower = query.toLowerCase(); return all.filter(f => f.name.toLowerCase().includes(lower)); }
 
-export async function getFoodItems(): Promise<FoodItem[]> {
-  const db = await getDB();
-  const custom = await db.getAll('foods');
-  return [...COMMON_FOODS, ...custom].sort((a, b) => a.name.localeCompare(b.name));
+export async function getDefaultUserProfile(): Promise<UserProfile> {
+  const existing = await getUserProfile();
+  if (existing) return existing;
+  return {
+    id: generateId(), age: 30, gender: 'male', height: 175, weight: 180, bodyFat: undefined,
+    activityLevel: 'moderate', goal: 'maintain', macroPreference: 'balanced', weeklyWeightChange: 0,
+    bmr: 0, tdee: 0, targetProtein: 150, targetCarbs: 250, targetFats: 65, targetCalories: 2200, targetWater: 3000,
+    lastUpdated: new Date().toISOString(),
+  };
 }
+export async function saveUserProfile(profile: UserProfile): Promise<void> { const db = await getDB(); profile.id = profile.id || generateId(); profile.lastUpdated = new Date().toISOString(); await db.put('userProfile', profile); }
+export async function getUserProfile(): Promise<UserProfile | null> { const db = await getDB(); const all = await db.getAllFromIndex('userProfile', 'by-lastUpdated'); return all.length > 0 ? all[all.length - 1] : null; }
+export async function updateUserProfile(updates: Partial<UserProfile>): Promise<UserProfile | null> { const current = await getDefaultUserProfile(); const updated = { ...current, ...updates, lastUpdated: new Date().toISOString() }; await saveUserProfile(updated); return updated; }
 
-export async function deleteFoodItem(id: string) {
+export async function addPhase(phase: FitnessPhase) { const db = await getDB(); await db.put('phases', phase); }
+export async function updatePhase(id: string, updates: Partial<FitnessPhase>) {
   const db = await getDB();
-  await db.delete('foods', id);
-}
-
-export async function searchFoods(query: string): Promise<FoodItem[]> {
-  const all = await getFoodItems();
-  const lower = query.toLowerCase();
-  return all.filter(f => f.name.toLowerCase().includes(lower));
-}
-
-export async function saveUserProfile(profile: UserProfile): Promise<void> {
-  const db = await getDB();
-  profile.id = profile.id || generateId();
-  profile.lastUpdated = new Date().toISOString();
-  await db.put('userProfile', profile);
-}
-
-export async function getUserProfile(): Promise<UserProfile | null> {
-  const db = await getDB();
-  const all = await db.getAllFromIndex('userProfile', 'by-lastUpdated');
-  return all.length > 0 ? all[0] : null;
-}
-
-export async function updateUserProfile(updates: Partial<UserProfile>): Promise<UserProfile | null> {
-  const db = await getDB();
-  const current = await getUserProfile();
+  const current = await db.get('phases', id);
   if (!current) return null;
-  const updated = { ...current, ...updates, lastUpdated: new Date().toISOString() };
-  await db.put('userProfile', updated);
+  const updated = { ...current, ...updates, id, updatedAt: new Date().toISOString() };
+  await db.put('phases', updated);
   return updated;
 }
-
-export async function getHealthSettings(): Promise<HealthSettings> {
-  const db = await getDB();
-  const settings = await db.get('healthSettings', 'settings');
-  return settings || DEFAULT_HEALTH_SETTINGS;
-}
-
-export async function updateHealthSettings(settings: Partial<HealthSettings>): Promise<void> {
-  const db = await getDB();
-  const current = await getHealthSettings();
-  const merged = { ...current, ...settings };
-  await db.put('healthSettings', merged);
-}
-
-export async function addHealthMetric(metric: StepData | HeartRateData | SleepData): Promise<void> {
-  const db = await getDB();
-  await db.put('healthMetrics', metric);
-}
-
-export async function getHealthMetricsByDate(date: string, type?: 'steps' | 'heartRate' | 'sleep' | 'restingHR'): Promise<(StepData | HeartRateData | SleepData)[]> {
-  const db = await getDB();
-  const all = await db.getAllFromIndex('healthMetrics', 'by-date', date);
-  if (type) return all.filter(m => (m as StepData).syncedAt !== undefined) as (StepData | HeartRateData | SleepData)[];
-  return all;
-}
-
-export async function deleteHealthMetric(id: string): Promise<void> {
-  const db = await getDB();
-  await db.delete('healthMetrics', id);
-}
-
-export async function addHealthWorkout(workout: HealthWorkout): Promise<void> {
-  const db = await getDB();
-  await db.put('healthWorkouts', workout);
-}
-
-export async function getHealthWorkouts(date?: string, source?: HealthDataSource, limit?: number): Promise<HealthWorkout[]> {
-  const db = await getDB();
-  let all: HealthWorkout[];
-  if (date && source) { const byDate = await db.getAllFromIndex('healthWorkouts', 'by-date', date); all = byDate.filter(w => w.source === source); }
-  else if (date) { all = await db.getAllFromIndex('healthWorkouts', 'by-date', date); }
-  else if (source) { all = await db.getAllFromIndex('healthWorkouts', 'by-source', source); }
-  else { all = await db.getAll('healthWorkouts'); }
-  const sorted = all.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  return limit ? sorted.slice(0, limit) : sorted;
-}
-
-export async function getHealthWorkoutByExternalId(source: HealthDataSource, externalId: string): Promise<HealthWorkout | undefined> {
-  const db = await getDB();
-  const all = await db.getAllFromIndex('healthWorkouts', 'by-externalId', externalId);
-  return all.find(w => w.source === source);
-}
-
-export async function deleteHealthWorkout(id: string): Promise<void> {
-  const db = await getDB();
-  await db.delete('healthWorkouts', id);
-}
-
-export async function addSyncHistory(entry: SyncHistory): Promise<void> {
-  const db = await getDB();
-  await db.put('healthSyncHistory', entry);
-}
-
-export async function deleteSyncHistory(id: string): Promise<void> {
-  const db = await getDB();
-  await db.delete('healthSyncHistory', id);
-}
+export async function getPhases(): Promise<FitnessPhase[]> { const db = await getDB(); const all = await db.getAllFromIndex('phases', 'by-startDate'); return all.sort((a, b) => a.startDate.localeCompare(b.startDate)); }
+export async function deletePhase(id: string) { const db = await getDB(); await db.delete('phases', id); }
+export async function getPhase(id: string) { const db = await getDB(); return db.get('phases', id); }
 
 export async function getExerciseHistory(exerciseName: string, limit: number): Promise<{ date: string; workoutId: string; sets: { reps: number; weight: number }[] }[]> {
   const db = await getDB();
@@ -601,15 +386,11 @@ export async function getExerciseHistory(exerciseName: string, limit: number): P
   return results;
 }
 
-const STORE_NAMES = ['workouts', 'weightLog', 'photos', 'programs', 'personalRecords', 'customExercises', 'workoutTemplates', 'measurements', 'meals', 'foods', 'userProfile', 'healthMetrics', 'healthWorkouts', 'healthSyncHistory', 'healthSettings'] as const;
+const STORE_NAMES = ['workouts', 'weightLog', 'photos', 'programs', 'personalRecords', 'customExercises', 'workoutTemplates', 'measurements', 'meals', 'foods', 'userProfile', 'phases'] as const;
 type StoreName = typeof STORE_NAMES[number];
 
 export interface FitTrackBackup {
-  metadata: {
-    exportDate: string;
-    appVersion: string;
-    storeCount: Record<StoreName, number>;
-  };
+  metadata: { exportDate: string; appVersion: string; storeCount: Record<StoreName, number>; };
   data: Record<StoreName, unknown[]>;
 }
 
@@ -634,9 +415,7 @@ export function validateBackup(json: unknown): json is FitTrackBackup {
   if (typeof meta.exportDate !== 'string') return false;
   if (typeof meta.appVersion !== 'string') return false;
   const data = obj.data as Record<string, unknown>;
-  for (const store of STORE_NAMES) {
-    if (data[store] !== undefined && !Array.isArray(data[store])) return false;
-  }
+  for (const store of STORE_NAMES) { if (data[store] !== undefined && !Array.isArray(data[store])) return false; }
   return true;
 }
 
@@ -650,10 +429,10 @@ export async function importAllData(backup: FitTrackBackup): Promise<{ imported:
     if (items && Array.isArray(items)) {
       for (const item of items) await tx.store.put(item as never);
       imported[store] = items.length;
-    } else { imported[store] = 0; }
+    } else imported[store] = 0;
     await tx.done;
   }
-  return { imported };
+  return { imported } as { imported: Record<StoreName, number> };
 }
 
 export function exportWorkoutsToCSV(workouts: Workout[]): string {
@@ -670,31 +449,17 @@ export function exportWorkoutsToCSV(workouts: Workout[]): string {
 }
 
 export function exportMeasurementsToCSV(measurements: Measurement[]): string {
-  const headers = ['Date', 'Chest (in)', 'Waist (in)', 'Hips (in)', 'Bicep Left (in)', 'Bicep Right (in)', 'Thigh Left (in)', 'Thigh Right (in)', 'Neck (in)', 'Notes'];
+  const headers = ['Date', 'Chest (in)', 'Waist (in)', 'Hips (in)', 'Bicep Left (in)', 'Bicep Right (in)', 'Thigh Left (in)', 'Thigh Right (in)', 'Neck (in)', 'Body Fat %', 'Notes'];
   const rows: string[][] = [headers];
   measurements.forEach(m => {
-    rows.push([m.date, m.chest?.toString() || '', m.waist?.toString() || '', m.hips?.toString() || '', m.bicepLeft?.toString() || '', m.bicepRight?.toString() || '', m.thighLeft?.toString() || '', m.thighRight?.toString() || '', m.neck?.toString() || '', `"${(m.notes || '').replace(/"/g, '""')}"`]);
+    rows.push([m.date, m.chest?.toString() || '', m.waist?.toString() || '', m.hips?.toString() || '', m.bicepLeft?.toString() || '', m.bicepRight?.toString() || '', m.thighLeft?.toString() || '', m.thighRight?.toString() || '', m.neck?.toString() || '', m.bodyFat?.toString() || '', `"${(m.notes || '').replace(/"/g, '""')}"`]);
   });
   return rows.map(row => row.join(',')).join('\n');
 }
 
 export async function exportAllDataWithCSV(): Promise<FitTrackBackup & { csvExports: { workouts: string; measurements: string } }> {
-  const db = await getDB();
-  const data: Record<string, unknown[]> = {};
-  const storeCount: Record<string, number> = {};
-  for (const store of STORE_NAMES) {
-    const items = await db.getAll(store);
-    data[store] = items;
-    storeCount[store] = items.length;
-  }
-  return {
-    metadata: { exportDate: new Date().toISOString(), appVersion: '0.1.0', storeCount },
-    data,
-    csvExports: {
-      workouts: exportWorkoutsToCSV((data.workouts as Workout[] || [])),
-      measurements: exportMeasurementsToCSV((data.measurements as Measurement[] || [])),
-    },
-  };
+  const data = await exportAllData();
+  return { ...data, csvExports: { workouts: exportWorkoutsToCSV((data.data.workouts as Workout[] || [])), measurements: exportMeasurementsToCSV((data.data.measurements as Measurement[] || [])) } };
 }
 
 export function validateCSVImport(csv: string, type: 'workouts' | 'measurements'): { valid: boolean; error?: string; rowCount?: number } {
@@ -703,43 +468,20 @@ export function validateCSVImport(csv: string, type: 'workouts' | 'measurements'
   if (lines.length < 2) return { valid: false, error: 'CSV has no data rows' };
   const headers = lines[0].split(',').map(h => h.trim());
   const expectedWorkoutHeaders = ['Date', 'Exercise', 'Set', 'Reps', 'Weight', 'Completed', 'Workout Notes'];
-  const expectedMeasurementHeaders = ['Date', 'Chest (in)', 'Waist (in)', 'Hips (in)', 'Bicep Left (in)', 'Bicep Right (in)', 'Thigh Left (in)', 'Thigh Right (in)', 'Neck (in)', 'Notes'];
+  const expectedMeasurementHeaders = ['Date', 'Chest (in)', 'Waist (in)', 'Hips (in)', 'Bicep Left (in)', 'Bicep Right (in)', 'Thigh Left (in)', 'Thigh Right (in)', 'Neck (in)', 'Body Fat %', 'Notes'];
   const expected = type === 'workouts' ? expectedWorkoutHeaders : expectedMeasurementHeaders;
   if (headers.length !== expected.length) return { valid: false, error: `Invalid header count. Expected ${expected.length}, got ${headers.length}` };
-  for (const expectedHeader of expected) {
-    if (!headers.some(h => h.toLowerCase() === expectedHeader.toLowerCase())) return { valid: false, error: `Missing required column: ${expectedHeader}` };
-  }
-  const indices = type === 'workouts' ? { date: 0, reps: 3, weight: 4 } : { date: 0 };
-  for (let i = 1; i < lines.length; i++) {
-    const row = lines[i].split(',').map(cell => cell.trim());
-    const date = row[indices.date!];
-    if (!date) return { valid: false, error: `Row ${i + 1}: Date is required` };
-    if (!/^\d{4}-\d{2}-\d{2}/.test(date)) return { valid: false, error: `Row ${i + 1}: Invalid date format. Use YYYY-MM-DD` };
-    if (type === 'workouts') {
-      const reps = parseInt(row[indices.reps!]);
-      const weight = parseFloat(row[indices.weight!]);
-      if (isNaN(reps) || reps < 0) return { valid: false, error: `Row ${i + 1}: Invalid reps value` };
-      if (isNaN(weight) || weight < 0) return { valid: false, error: `Row ${i + 1}: Invalid weight value` };
-    }
-  }
   return { valid: true, rowCount: lines.length - 1 };
 }
 
-export interface StoreStats {
-  store: StoreName;
-  count: number;
-  sizeBytes: number;
-}
-
+export interface StoreStats { store: StoreName; count: number; sizeBytes: number; }
 export async function getStorageStats(): Promise<StoreStats[]> {
   const db = await getDB();
   const stats: StoreStats[] = [];
   for (const store of STORE_NAMES) {
     const items = await db.getAll(store);
     let size = 0;
-    for (const item of items) {
-      try { size += JSON.stringify(item).length; } catch { /* ignore */ }
-    }
+    for (const item of items) { try { size += JSON.stringify(item).length; } catch {} }
     stats.push({ store, count: items.length, sizeBytes: size });
   }
   return stats;
@@ -747,49 +489,30 @@ export async function getStorageStats(): Promise<StoreStats[]> {
 
 export async function clearAllData(): Promise<void> {
   const db = await getDB();
-  for (const store of STORE_NAMES) {
-    const tx = db.transaction(store, 'readwrite');
-    await tx.store.clear();
-    await tx.done;
-  }
+  for (const store of STORE_NAMES) { const tx = db.transaction(store, 'readwrite'); await tx.store.clear(); await tx.done; }
 }
 
 export async function cleanupOldData(options: { workoutsOlderThanDays?: number; keepLastNMeasurements?: number; deletePhotosOlderThanDays?: number }): Promise<{ deleted: Record<string, number> }> {
   const db = await getDB();
   const deleted: Record<string, number> = {};
   if (options.workoutsOlderThanDays) {
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - options.workoutsOlderThanDays);
-    const cutoffStr = cutoff.toISOString().split('T')[0];
+    const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - options.workoutsOlderThanDays); const cutoffStr = cutoff.toISOString().split('T')[0];
     const allWorkouts = await db.getAllFromIndex('workouts', 'by-date');
     const toDelete = allWorkouts.filter(w => w.date < cutoffStr).map(w => w.id);
-    const tx = db.transaction('workouts', 'readwrite');
-    for (const id of toDelete) await tx.store.delete(id);
-    await tx.done;
-    deleted.workouts = toDelete.length;
+    const tx = db.transaction('workouts', 'readwrite'); for (const id of toDelete) await tx.store.delete(id); await tx.done; deleted.workouts = toDelete.length;
   }
   if (options.keepLastNMeasurements) {
     const allMeasurements = await db.getAllFromIndex('measurements', 'by-date');
     const toDelete = allMeasurements.reverse().slice(options.keepLastNMeasurements).map(m => m.id);
-    const tx = db.transaction('measurements', 'readwrite');
-    for (const id of toDelete) await tx.store.delete(id);
-    await tx.done;
-    deleted.measurements = toDelete.length;
+    const tx = db.transaction('measurements', 'readwrite'); for (const id of toDelete) await tx.store.delete(id); await tx.done; deleted.measurements = toDelete.length;
   }
   if (options.deletePhotosOlderThanDays) {
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - options.deletePhotosOlderThanDays);
-    const cutoffStr = cutoff.toISOString().split('T')[0];
+    const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - options.deletePhotosOlderThanDays); const cutoffStr = cutoff.toISOString().split('T')[0];
     const allPhotos = await db.getAllFromIndex('photos', 'by-date');
     const toDelete = allPhotos.filter(p => p.date < cutoffStr).map(p => p.id);
-    const tx = db.transaction('photos', 'readwrite');
-    for (const id of toDelete) await tx.store.delete(id);
-    await tx.done;
-    deleted.photos = toDelete.length;
+    const tx = db.transaction('photos', 'readwrite'); for (const id of toDelete) await tx.store.delete(id); await tx.done; deleted.photos = toDelete.length;
   }
   return { deleted };
 }
 
-export function generateId() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2);
-}
+export function generateId() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }

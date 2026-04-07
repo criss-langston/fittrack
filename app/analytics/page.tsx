@@ -5,11 +5,9 @@ import {
   getWorkouts,
   getCustomExercises,
   getPersonalRecords,
-  getHealthSettings,
 } from "@/lib/db";
 import WorkoutHeatmap from "@/components/WorkoutHeatmap";
 import MuscleGroupChart from "@/components/MuscleGroupChart";
-import HealthMetricsCard from "@/components/HealthMetricsCard";
 import { Trophy, Activity, Dumbbell, Calendar, AlertCircle } from "lucide-react";
 
 interface Workout {
@@ -41,7 +39,6 @@ export default function AnalyticsPage() {
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [customExercises, setCustomExercises] = useState<CustomExercise[]>([]);
   const [prs, setPrs] = useState<PR[]>([]);
-  const [healthEnabled, setHealthEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,16 +46,14 @@ export default function AnalyticsPage() {
     setLoading(true);
     setError(null);
     try {
-      const [workoutData, customExData, prData, healthSettings] = await Promise.all([
+      const [workoutData, customExData, prData] = await Promise.all([
         getWorkouts(),
         getCustomExercises(),
         getPersonalRecords(),
-        getHealthSettings(),
       ]);
       setWorkouts(workoutData as Workout[]);
       setCustomExercises(customExData as CustomExercise[]);
       setPrs(prData as PR[]);
-      setHealthEnabled(healthSettings.enabled && healthSettings.connectedSources.length > 0);
     } catch (err) {
       console.error("Failed to load analytics data:", err);
       setError("Failed to load analytics. Please refresh the page.");
@@ -75,15 +70,15 @@ export default function AnalyticsPage() {
   const totalVolume = workouts.reduce((sum, w) => {
     const vol = w.exercises.reduce((exSum, ex) => {
       return exSum + ex.sets
-        .filter(s => s.completed)
+        .filter((s) => s.completed)
         .reduce((setSum, s) => setSum + s.reps * s.weight, 0);
     }, 0);
     return sum + vol;
   }, 0);
 
-  const exercisesWithPRs = new Set(prs.map(p => p.exercise)).size;
+  const exercisesWithPRs = new Set(prs.map((p) => p.exercise)).size;
 
-  const lastWeek = workouts.filter(w => {
+  const lastWeek = workouts.filter((w) => {
     const date = new Date(w.date);
     const weekAgo = new Date();
     weekAgo.setDate(weekAgo.getDate() - 7);
@@ -92,12 +87,12 @@ export default function AnalyticsPage() {
 
   if (loading) {
     return (
-      <div className="px-4 pt-6 animate-fade-in">
+      <div className="px-4 pt-6 animate-fade-in max-w-lg mx-auto">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-bold">Analytics</h1>
         </div>
         <div className="space-y-4">
-          {[1, 2, 3].map(i => (
+          {[1, 2, 3].map((i) => (
             <div key={i} className="card animate-pulse">
               <div className="h-4 bg-gray-800 rounded w-1/3 mb-2" />
               <div className="h-20 bg-gray-800 rounded" />
@@ -109,8 +104,9 @@ export default function AnalyticsPage() {
   }
 
   return (
-    <div className="px-4 pt-6 pb-24 animate-fade-in">
-      <h1 className="text-2xl font-bold mb-6">Analytics</h1>
+    <div className="px-4 pt-6 pb-24 animate-fade-in max-w-lg mx-auto">
+      <h1 className="text-2xl font-bold mb-2">Analytics</h1>
+      <p className="text-sm text-gray-500 mb-6">A quick view of your progress stored on this device.</p>
 
       {error && (
         <div className="mb-4 flex items-center gap-2 bg-red-900/30 border border-red-700/50 text-red-300 text-sm rounded-xl px-4 py-3">
@@ -139,7 +135,7 @@ export default function AnalyticsPage() {
             <span className="text-xs text-gray-500">Total Volume</span>
           </div>
           <p className="text-2xl font-bold">{totalVolume.toLocaleString()}</p>
-          <p className="text-xs text-gray-500">lbs &times; reps</p>
+          <p className="text-xs text-gray-500">lbs × reps</p>
         </div>
         <div className="card">
           <div className="flex items-center gap-2 mb-2">
@@ -175,18 +171,11 @@ export default function AnalyticsPage() {
         )}
       </div>
 
-      {healthEnabled && (
-        <div className="card mb-4">
-          <h3 className="text-sm font-semibold mb-3">Health Overview</h3>
-          <HealthMetricsCard />
-        </div>
-      )}
-
       {prs.length > 0 && (
         <div className="card mb-4">
-          <h3 className="text-sm font-semibold mb-3">Personal Records</h3>
+          <h3 className="text-sm font-semibold mb-3">Recent Personal Records</h3>
           <div className="space-y-2">
-            {prs.slice(0, 5).map(pr => (
+            {prs.slice(0, 5).map((pr) => (
               <div key={pr.id} className="flex items-center justify-between p-2 bg-gray-800 rounded-lg">
                 <div>
                   <p className="font-medium text-sm">{pr.exercise}</p>

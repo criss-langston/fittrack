@@ -19,6 +19,7 @@ interface MeasurementLineChartProps {
   entries: (Measurement & { id: string })[];
   chartField: keyof Measurement;
   fieldLabel: string;
+  unit?: string;
 }
 
 function formatShortDate(iso: string) {
@@ -32,6 +33,7 @@ export default function MeasurementLineChart({
   entries,
   chartField,
   fieldLabel,
+  unit = "in",
 }: MeasurementLineChartProps) {
   const chartData = {
     labels: entries.map((e) => formatShortDate(e.date)),
@@ -70,7 +72,7 @@ export default function MeasurementLineChart({
         cornerRadius: 8,
         padding: 10,
         callbacks: {
-          label: (ctx: { parsed: { y: number | null } }) => `${ctx.parsed.y ?? 0} in`,
+          label: (ctx: { parsed: { y: number | null } }) => `${ctx.parsed.y ?? 0} ${unit}`,
         },
       },
     },
@@ -83,7 +85,7 @@ export default function MeasurementLineChart({
         ticks: {
           color: "#6b7280",
           font: { size: 10 },
-          callback: (value: string | number) => `${value}"`,
+          callback: (value: string | number) => `${value}${unit === "%" ? "%" : '"'}`,
         },
         grid: { color: "rgba(75, 85, 99, 0.3)" },
       },

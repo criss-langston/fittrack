@@ -4,12 +4,13 @@ import "./globals.css";
 import BottomNav from "@/components/BottomNav";
 import InstallPrompt from "@/components/InstallPrompt";
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
+import { Providers } from "@/app/providers";
 
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "FitTrack",
-  description: "Personal fitness tracker",
+  description: "A mobile-first, device-local fitness tracker",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
@@ -32,12 +33,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" suppressHydrationWarning>
       <body className={`${inter.className} bg-gray-950 text-white antialiased`}>
-        <main className="min-h-screen pb-24">{children}</main>
-        <InstallPrompt />
-        <ServiceWorkerRegistration />
-        <BottomNav />
+        <Providers attribute="class" defaultTheme="dark" enableSystem>
+          <main className="min-h-screen pb-24">{children}</main>
+          <InstallPrompt />
+          <ServiceWorkerRegistration />
+          <BottomNav />
+        </Providers>
       </body>
     </html>
   );
