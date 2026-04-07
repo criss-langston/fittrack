@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { addPhase, getPhases, deletePhase, generateId, updatePhase, type FitnessPhase, type PhaseType } from "@/lib/db";
+import { useToast } from "@/app/providers";
 import { ChevronLeft, ChevronRight, Calendar as CalIcon, Plus, Trash2, X, Pencil } from "lucide-react";
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -16,6 +17,7 @@ function overlapsMonth(phase: FitnessPhase, year: number, month: number) { const
 function isPhaseOnDate(phase: FitnessPhase, date: string) { return phase.startDate <= date && phase.endDate >= date; }
 
 export default function CalendarPage() {
+  const { showToast } = useToast();
   const now = new Date();
   const [currentYear, setCurrentYear] = useState(now.getFullYear());
   const [currentMonth, setCurrentMonth] = useState(now.getMonth());
@@ -68,11 +70,20 @@ export default function CalendarPage() {
   };
 
   const savePhase = async () => {
-    if (!draft.name.trim()) return;
+    if (!draft.name.trim()) {
+      showToast("Phase name is required.", "error");
+      return;
+    }
+    if (draft.endDate < draft.startDate) {
+      showToast("End date cannot be before start date.", "error");
+      return;
+    }
     if (editingPhaseId) {
       await updatePhase(editingPhaseId, { name: draft.name.trim(), type: draft.type, startDate: draft.startDate, endDate: draft.endDate, description: draft.description.trim() || undefined });
+      showToast("Phase updated.", "success");
     } else {
       await addPhase({ id: generateId(), name: draft.name.trim(), type: draft.type, startDate: draft.startDate, endDate: draft.endDate, description: draft.description.trim() || undefined, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+      showToast("Phase created.", "success");
     }
     setShowForm(false);
     setEditingPhaseId(null);
@@ -80,7 +91,7 @@ export default function CalendarPage() {
     await loadPhases();
   };
 
-  const confirmDeletePhase = async (id: string) => { if (confirm('Delete this phase?')) { await deletePhase(id); await loadPhases(); } };
+  const confirmDeletePhase = async (id: string) => { if (confirm('Delete this phase?')) { await deletePhase(id); await loadPhases(); showToast('Phase deleted.', 'success'); } };
   const goToPrevMonth = () => currentMonth === 0 ? (setCurrentMonth(11), setCurrentYear((y) => y - 1)) : setCurrentMonth((m) => m - 1);
   const goToNextMonth = () => currentMonth === 11 ? (setCurrentMonth(0), setCurrentYear((y) => y + 1)) : setCurrentMonth((m) => m + 1);
 

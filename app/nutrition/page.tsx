@@ -25,6 +25,7 @@ import {
   Target,
   PencilLine,
 } from "lucide-react";
+import { useToast } from "@/app/providers";
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
@@ -35,19 +36,18 @@ function getWeekDates(): string[] { const dates: string[] = []; for (let i = 6; 
 function progressColor(consumed: number, target: number) { return target > 0 && consumed > target ? 'bg-red-500' : 'bg-emerald-500'; }
 
 export default function NutritionPage() {
+  const { showToast } = useToast();
   const [selectedDate, setSelectedDate] = useState(getTodayISO());
   const [entries, setEntries] = useState<MacroLog[]>([]);
   const [summary, setSummary] = useState({ totalCalories: 0, totalProtein: 0, totalCarbs: 0, totalFat: 0, mealCount: 0 });
   const [weeklyAvg, setWeeklyAvg] = useState({ calories: 0, protein: 0, carbs: 0, fat: 0 });
   const [loading, setLoading] = useState(true);
   const [showAddEntry, setShowAddEntry] = useState(false);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [targets, setTargets] = useState({ targetCalories: 2200, targetProtein: 150, targetCarbs: 250, targetFats: 65 });
   const [draft, setDraft] = useState({ calories: '', protein: '', carbs: '', fat: '', notes: '' });
 
   const loadTargets = useCallback(async () => {
     const p = await getDefaultUserProfile();
-    setProfile(p);
     setTargets({
       targetCalories: p.targetCalories || 2200,
       targetProtein: p.targetProtein || 150,
@@ -89,8 +89,14 @@ export default function NutritionPage() {
   useEffect(() => { loadDay(selectedDate); loadWeeklyAvg(); }, [selectedDate, loadDay, loadWeeklyAvg]);
 
   const saveTargets = async () => {
+    if (targets.targetCalories < 0 || targets.targetProtein < 0 || targets.targetCarbs < 0 || targets.targetFats < 0) {
+      showToast("Targets cannot be negative.", "error");
+      return;
+    }
     const updated = await updateUserProfile(targets);
-    if (updated) setProfile(updated);
+    if (updated) {
+      showToast("Targets updated.", "success");
+    }
   };
 
   const saveEntry = async () => {
@@ -98,7 +104,14 @@ export default function NutritionPage() {
     const protein = Number(draft.protein) || 0;
     const carbs = Number(draft.carbs) || 0;
     const fat = Number(draft.fat) || 0;
-    if (calories <= 0 && protein <= 0 && carbs <= 0 && fat <= 0) return;
+    if (calories < 0 || protein < 0 || carbs < 0 || fat < 0) {
+      showToast("Nutrition values cannot be negative.", "error");
+      return;
+    }
+    if (calories <= 0 && protein <= 0 && carbs <= 0 && fat <= 0) {
+      showToast("Enter at least one macro or calorie value.", "error");
+      return;
+    }
     await addMacroLog({
       id: generateId(),
       date: selectedDate,
@@ -111,11 +124,18 @@ export default function NutritionPage() {
     });
     setDraft({ calories: '', protein: '', carbs: '', fat: '', notes: '' });
     setShowAddEntry(false);
-    loadDay(selectedDate);
-    loadWeeklyAvg();
+    await loadDay(selectedDate);
+    await loadWeeklyAvg();
+    showToast("Macro log saved.", "success");
   };
 
-  const handleDeleteEntry = async (id: string) => { await deleteMacroLog(id); loadDay(selectedDate); loadWeeklyAvg(); };
+  const handleDeleteEntry = async (id: string) => {
+    await deleteMacroLog(id);
+    await loadDay(selectedDate);
+    await loadWeeklyAvg();
+    showToast("Macro log deleted.", "success");
+  };
+
   const isToday = selectedDate === getTodayISO();
   const isYesterday = selectedDate === getYesterdayISO();
   const dateLabel = isToday ? 'Today' : isYesterday ? 'Yesterday' : formatDate(selectedDate);

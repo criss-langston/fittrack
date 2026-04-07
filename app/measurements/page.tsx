@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { addMeasurement, getMeasurements, deleteMeasurement, addPhoto, getPhotos, deletePhoto, addWeightEntry, getWeightEntries, generateId, type Measurement } from "@/lib/db";
 import { Plus, Camera, Scale, Trash2, ChevronDown, ChevronUp, X, TrendingUp, Image as ImageIcon, Activity } from "lucide-react";
+import { useToast } from "@/app/providers";
 import dynamic from "next/dynamic";
 
 const WeightLineChart = dynamic(() => import("@/components/WeightLineChart"), { loading: () => <div className="h-40 bg-gray-800 rounded-lg animate-pulse" />, ssr: false });
@@ -28,6 +29,7 @@ function formatFullDate(dateStr: string) { return new Date(dateStr).toLocaleDate
 function resizeImage(file: File, maxWidth: number): Promise<string> { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => { const img = new Image(); img.onload = () => { const canvas = document.createElement('canvas'); let w = img.width, h = img.height; if (w > maxWidth) { h = Math.round((h * maxWidth) / w); w = maxWidth; } canvas.width = w; canvas.height = h; const ctx = canvas.getContext('2d'); if (!ctx) return reject(new Error('Canvas not supported')); ctx.drawImage(img, 0, 0, w, h); resolve(canvas.toDataURL('image/jpeg', 0.85)); }; img.onerror = reject; img.src = reader.result as string; }; reader.onerror = reject; reader.readAsDataURL(file); }); }
 
 export default function MeasurementsPage() {
+  const { showToast } = useToast();
   const [entries, setEntries] = useState<Measurement[]>([]);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [weights, setWeights] = useState<WeightEntry[]>([]);
@@ -73,18 +75,29 @@ export default function MeasurementsPage() {
   const latestWeightDelta = weights.length >= 2 ? Number((weights[0].weight - weights[1].weight).toFixed(1)) : null;
 
   const handleMeasurementSave = async () => {
-    const parseVal = (key: string): number | undefined => { const v = parseFloat(formValues[key] || ''); return !isNaN(v) && v > 0 ? v : undefined; };
-    const measurement: Measurement = { id: generateId(), date: new Date(measurementDate + 'T12:00:00').toISOString(), chest: parseVal('chest'), waist: parseVal('waist'), hips: parseVal('hips'), bicepLeft: parseVal('bicepLeft'), bicepRight: parseVal('bicepRight'), thighLeft: parseVal('thighLeft'), thighRight: parseVal('thighRight'), neck: parseVal('neck'), bodyFat: parseFloat(bodyFatInput) || undefined, notes: notes.trim() || undefined };
+    const parseVal = (key: string): number | undefined => { const raw = formValues[key] || ''; const v = parseFloat(raw); if (raw && v < 0) return -1; return !isNaN(v) && v > 0 ? v : undefined; };
+    const values = ['chest','waist','hips','bicepLeft','bicepRight','thighLeft','thighRight','neck'].map(parseVal);
+    if (values.some((v) => v === -1) || (bodyFatInput && Number(bodyFatInput) < 0)) {
+      showToast('Measurements cannot be negative.', 'error');
+      return;
+    }
+    const hasMeasurement = values.some((v) => typeof v === 'number' && v > 0) || (!!bodyFatInput && Number(bodyFatInput) > 0);
+    if (!hasMeasurement) {
+      showToast('Enter at least one measurement or body fat value.', 'error');
+      return;
+    }
+    const measurement: Measurement = { id: generateId(), date: new Date(measurementDate + 'T12:00:00').toISOString(), chest: parseVal('chest') || undefined, waist: parseVal('waist') || undefined, hips: parseVal('hips') || undefined, bicepLeft: parseVal('bicepLeft') || undefined, bicepRight: parseVal('bicepRight') || undefined, thighLeft: parseVal('thighLeft') || undefined, thighRight: parseVal('thighRight') || undefined, neck: parseVal('neck') || undefined, bodyFat: parseFloat(bodyFatInput) || undefined, notes: notes.trim() || undefined };
     await addMeasurement(measurement);
     setShowMeasurementModal(false); setFormValues({}); setNotes(''); setBodyFatInput('');
     await loadAll();
+    showToast('Measurement saved.', 'success');
   };
 
-  const handleDeleteMeasurement = async (id: string) => { await deleteMeasurement(id); await loadAll(); };
-  const handleQuickWeight = async () => { const value = parseFloat(weightInput); if (!value) return; await addWeightEntry({ id: generateId(), date: new Date().toISOString(), weight: value }); setWeightInput(''); setShowWeightModal(false); await loadAll(); };
+  const handleDeleteMeasurement = async (id: string) => { await deleteMeasurement(id); await loadAll(); showToast('Measurement deleted.', 'success'); };
+  const handleQuickWeight = async () => { const value = parseFloat(weightInput); if (!value || isNaN(value)) { showToast('Enter a valid weight.', 'error'); return; } if (value < 0) { showToast('Weight cannot be negative.', 'error'); return; } await addWeightEntry({ id: generateId(), date: new Date().toISOString(), weight: value }); setWeightInput(''); setShowWeightModal(false); await loadAll(); showToast('Weight saved.', 'success'); };
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (!file) return; const dataUrl = await resizeImage(file, 900); setPhotoPreview(dataUrl); if (fileRef.current) fileRef.current.value = ''; };
-  const savePhoto = async () => { if (!photoPreview) return; await addPhoto({ id: generateId(), date: new Date(photoDate + 'T12:00:00').toISOString(), dataUrl: photoPreview, caption: photoCaption.trim() || undefined }); setPhotoPreview(null); setPhotoCaption(''); await loadAll(); };
-  const handleDeletePhoto = async () => { if (!previewPhotoId) return; await deletePhoto(previewPhotoId); setPreviewPhoto(null); setPreviewPhotoId(null); await loadAll(); };
+  const savePhoto = async () => { if (!photoPreview) { showToast('Choose a photo first.', 'error'); return; } await addPhoto({ id: generateId(), date: new Date(photoDate + 'T12:00:00').toISOString(), dataUrl: photoPreview, caption: photoCaption.trim() || undefined }); setPhotoPreview(null); setPhotoCaption(''); await loadAll(); showToast('Photo saved.', 'success'); };
+  const handleDeletePhoto = async () => { if (!previewPhotoId) return; await deletePhoto(previewPhotoId); setPreviewPhoto(null); setPreviewPhotoId(null); await loadAll(); showToast('Photo deleted.', 'success'); };
 
   return (
     <div className="px-4 pt-6 pb-28 animate-fade-in max-w-lg mx-auto">

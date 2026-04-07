@@ -54,6 +54,21 @@ export interface MacroLog {
   createdAt: string;
 }
 
+export type ReadinessLevel = 'Low' | 'Medium' | 'High';
+export type SleepLevel = 'Bad' | 'OK' | 'Good';
+export type TrainingLevel = 'Bad' | 'OK' | 'Great';
+
+export interface ReadinessLog {
+  id: string;
+  date: string;
+  energy: ReadinessLevel;
+  recovery: ReadinessLevel;
+  sleep: SleepLevel;
+  training: TrainingLevel;
+  notes?: string;
+  createdAt: string;
+}
+
 export interface FoodItem {
   id: string;
   name: string;
@@ -208,6 +223,7 @@ interface FitTrackDB extends DBSchema {
   measurements: { key: string; value: Measurement; indexes: { 'by-date': string } };
   meals: { key: string; value: Meal; indexes: { 'by-date': string; 'by-mealType': string } };
   macroLogs: { key: string; value: MacroLog; indexes: { 'by-date': string } };
+  readinessLogs: { key: string; value: ReadinessLog; indexes: { 'by-date': string } };
   foods: { key: string; value: FoodItem; indexes: { 'by-name': string } };
   userProfile: { key: string; value: UserProfile; indexes: { 'by-lastUpdated': string } };
   phases: { key: string; value: FitnessPhase; indexes: { 'by-startDate': string; 'by-endDate': string; 'by-type': string } };
@@ -217,7 +233,7 @@ let dbPromise: Promise<IDBPDatabase<FitTrackDB>> | null = null;
 
 export function getDB(): Promise<IDBPDatabase<FitTrackDB>> {
   if (!dbPromise) {
-    dbPromise = openDB<FitTrackDB>('fittrack', 10, {
+    dbPromise = openDB<FitTrackDB>('fittrack', 11, {
       upgrade(db, oldVersion) {
         if (oldVersion < 1) {
           const workoutStore = db.createObjectStore('workouts', { keyPath: 'id' });
@@ -256,6 +272,10 @@ export function getDB(): Promise<IDBPDatabase<FitTrackDB>> {
           if ((db.objectStoreNames as DOMStringList).contains('foods')) {
             (db as unknown as IDBDatabase).deleteObjectStore('foods');
           }
+        }
+        if (oldVersion < 11) {
+          const readinessStore = db.createObjectStore('readinessLogs', { keyPath: 'id' });
+          readinessStore.createIndex('by-date', 'date');
         }
         if (oldVersion < 7) {
           const userProfileStore = db.createObjectStore('userProfile', { keyPath: 'id' });
@@ -327,6 +347,52 @@ export async function deleteMeasurement(id: string) { const db = await getDB(); 
 export async function addMacroLog(log: MacroLog) { const db = await getDB(); await db.put('macroLogs', log); }
 export async function getMacroLogs(date?: string): Promise<MacroLog[]> { const db = await getDB(); if (date) return db.getAllFromIndex('macroLogs', 'by-date', date); const all = await db.getAllFromIndex('macroLogs', 'by-date'); return all.reverse(); }
 export async function deleteMacroLog(id: string) { const db = await getDB(); await db.delete('macroLogs', id); }
+
+export function getReadinessScore(log: ReadinessLog): number {
+  const scoreLevel = (value: ReadinessLevel) => value === 'High' ? 10 : value === 'Medium' ? 7 : 4;
+  const scoreSleep = (value: SleepLevel) => value === 'Good' ? 10 : value === 'OK' ? 7 : 4;
+  const scoreTraining = (value: TrainingLevel) => value === 'Great' ? 10 : value === 'OK' ? 7 : 4;
+  return Math.round((scoreLevel(log.energy) + scoreLevel(log.recovery) + scoreSleep(log.sleep) + scoreTraining(log.training)) / 4);
+}
+
+export async function addReadinessLog(log: ReadinessLog) { const db = await getDB(); await db.put('readinessLogs', log); }
+export async function getReadinessLogs(date?: string): Promise<ReadinessLog[]> { const db = await getDB(); if (date) return db.getAllFromIndex('readinessLogs', 'by-date', date); const all = await db.getAllFromIndex('readinessLogs', 'by-date'); return all.reverse(); }
+export async function deleteReadinessLog(id: string) { const db = await getDB(); await db.delete('readinessLogs', id); }
+
+export function getCoachCommand(weightDelta: number, avgReadiness: number) {
+  if (weightDelta === 0 && avgReadiness >= 7) return 'Recomp working — hold steady';
+  if (weightDelta === 0 && avgReadiness < 7) return 'Increase calories (+150 to 250)';
+  if (weightDelta > 1) return 'Reduce calories (-150 to 200)';
+  if (avgReadiness < 6) return 'Recover first (sleep / reduce volume)';
+  return 'Stay the course';
+}
+
+export async function getWeeklyReadinessSummary() {
+  const logs = await getReadinessLogs();
+  const currentWeek = logs.slice(0, 7);
+  const previousWeek = logs.slice(7, 14);
+  const weights = await getWeightEntries(14);
+  const currentWeightAvg = currentWeek.length > 0 ? 0 : 0;
+  const currentWeightWindow = weights.slice(0, 7).map((w) => Number(w.weight)).filter(Boolean);
+  const previousWeightWindow = weights.slice(7, 14).map((w) => Number(w.weight)).filter(Boolean);
+  const average = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+  const avgReadiness = Math.round(average(currentWeek.map(getReadinessScore)));
+  const avgCalories = Math.round(average((await getMacroLogs()).slice(0, 7).map((log) => Number(log.calories)).filter(Boolean)));
+  const avgWeight = average(currentWeightWindow);
+  const prevAvgWeight = average(previousWeightWindow);
+  const weightDelta = avgWeight && prevAvgWeight ? Number((avgWeight - prevAvgWeight).toFixed(1)) : 0;
+  return {
+    currentWeek,
+    previousWeek,
+    avgReadiness,
+    avgCalories,
+    avgWeight,
+    prevAvgWeight,
+    weightDelta,
+    command: getCoachCommand(weightDelta, avgReadiness || 0),
+  };
+}
+
 export async function getDailyNutritionSummary(date: string): Promise<{ totalCalories: number; totalProtein: number; totalCarbs: number; totalFat: number; mealCount: number; byMealType: Record<string, { calories: number; protein: number; carbs: number; fat: number }> }> {
   const logs = await getMacroLogs(date);
   const totalCalories = logs.reduce((sum, log) => sum + log.calories, 0);
@@ -387,7 +453,7 @@ export async function getExerciseHistory(exerciseName: string, limit: number): P
   return results;
 }
 
-const STORE_NAMES = ['workouts', 'weightLog', 'photos', 'programs', 'personalRecords', 'customExercises', 'workoutTemplates', 'measurements', 'macroLogs', 'userProfile', 'phases'] as const;
+const STORE_NAMES = ['workouts', 'weightLog', 'photos', 'programs', 'personalRecords', 'customExercises', 'workoutTemplates', 'measurements', 'macroLogs', 'readinessLogs', 'userProfile', 'phases'] as const;
 type StoreName = typeof STORE_NAMES[number];
 
 export interface FitTrackBackup {

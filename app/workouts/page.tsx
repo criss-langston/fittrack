@@ -24,6 +24,7 @@ import RestTimer from "@/components/RestTimer";
 import Confetti from "@/components/Confetti";
 import FilterPanel from "@/components/FilterPanel";
 import CustomExerciseManager from "@/components/CustomExerciseManager";
+import { useToast } from "@/app/providers";
 
 interface WorkoutSet { reps: number; weight: number; completed: boolean; }
 interface Exercise { name: string; sets: WorkoutSet[]; }
@@ -45,6 +46,7 @@ function getSupersetBgColor(idx: number) { const colors = ['bg-violet-500/10', '
 function getSupersetLabel(groupIndex: number, itemIndex: number) { return `${String.fromCharCode(65 + groupIndex)}${itemIndex + 1}`; }
 
 export default function WorkoutsPage() {
+  const { showToast } = useToast();
   const [activeTab, setActiveTab] = useState<WorkoutsTab>('log');
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [availableExercises, setAvailableExercises] = useState<string[]>([]);
@@ -100,7 +102,7 @@ export default function WorkoutsPage() {
 
   const calcVolume = (list: Exercise[]) => list.reduce((sum, ex) => sum + ex.sets.filter((s) => s.completed).reduce((setSum, s) => setSum + s.reps * s.weight, 0), 0);
   const formatDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
-  const addExercise = (name?: string) => { const exerciseName = name?.trim() || searchTerm.trim(); if (!exerciseName) return; setExercises((prev) => [...prev, { name: exerciseName, sets: [{ reps: 10, weight: 0, completed: true }] }]); checkOverload(exerciseName); setSearchTerm(''); setShowSuggestions(false); };
+  const addExercise = (name?: string) => { const exerciseName = name?.trim() || searchTerm.trim(); if (!exerciseName) { showToast('Enter an exercise name.', 'error'); return; } setExercises((prev) => [...prev, { name: exerciseName, sets: [{ reps: 10, weight: 0, completed: true }] }]); checkOverload(exerciseName); setSearchTerm(''); setShowSuggestions(false); showToast('Exercise added.', 'success'); };
   const removeExercise = (idx: number) => setExercises((prev) => prev.filter((_, i) => i !== idx));
   const addSet = (exerciseIdx: number) => setExercises((prev) => prev.map((ex, i) => i === exerciseIdx ? { ...ex, sets: [...ex.sets, { reps: 10, weight: 0, completed: true }] } : ex));
   const removeSet = (exerciseIdx: number, setIdx: number) => setExercises((prev) => prev.map((ex, i) => i === exerciseIdx ? { ...ex, sets: ex.sets.filter((_, si) => si !== setIdx) } : ex));
@@ -109,7 +111,7 @@ export default function WorkoutsPage() {
   const cancelWorkout = () => { setIsNew(false); setExercises([]); setWorkoutNotes(''); setWorkoutRpe(5); setSupersets([]); setSelectedProgramId(''); };
 
   const finishWorkout = async () => {
-    if (exercises.length === 0) return;
+    if (exercises.length === 0) { showToast('Add at least one exercise before saving.', 'error'); return; }
     const workout: Workout = { id: generateId(), date: new Date().toISOString(), exercises, notes: workoutNotes.trim() || undefined, rpe: workoutRpe, programId: selectedProgramId || undefined, supersets: supersets.length > 0 ? supersets : undefined };
     await addWorkout(workout);
     const existingPRs = await getPersonalRecords();
@@ -123,18 +125,19 @@ export default function WorkoutsPage() {
     });
     setNewPRs(newPRExercises); if (newPRExercises.length > 0) setConfettiTrigger(true);
     cancelWorkout(); await loadWorkouts();
+    showToast(newPRExercises.length > 0 ? 'Workout saved. New PR recorded!' : 'Workout saved.', 'success');
   };
 
-  const handleDelete = async (id: string) => { await deleteWorkout(id); await loadWorkouts(); };
-  const saveTemplate = async () => { if (!templateName.trim() || exercises.length === 0) return; await addWorkoutTemplate({ id: generateId(), name: templateName.trim(), exercises: exercises.map((e) => ({ name: e.name, sets: e.sets.length, reps: e.sets[0]?.reps || 10 })), createdAt: new Date().toISOString() }); setTemplateName(''); setShowSaveTemplate(false); await loadTemplates(); };
-  const loadTemplateIntoWorkout = (template: WorkoutTemplate) => { setExercises(template.exercises.map((exercise) => ({ name: exercise.name, sets: Array.from({ length: exercise.sets }, () => ({ reps: exercise.reps, weight: 0, completed: true })) }))); setIsNew(true); setActiveTab('log'); setShowTemplateModal(false); };
-  const removeTemplate = async (id: string) => { await deleteWorkoutTemplate(id); await loadTemplates(); };
+  const handleDelete = async (id: string) => { await deleteWorkout(id); await loadWorkouts(); showToast('Workout deleted.', 'success'); };
+  const saveTemplate = async () => { if (!templateName.trim()) { showToast('Template name is required.', 'error'); return; } if (exercises.length === 0) { showToast('Add exercises before saving a template.', 'error'); return; } await addWorkoutTemplate({ id: generateId(), name: templateName.trim(), exercises: exercises.map((e) => ({ name: e.name, sets: e.sets.length, reps: e.sets[0]?.reps || 10 })), createdAt: new Date().toISOString() }); setTemplateName(''); setShowSaveTemplate(false); await loadTemplates(); showToast('Template saved.', 'success'); };
+  const loadTemplateIntoWorkout = (template: WorkoutTemplate) => { setExercises(template.exercises.map((exercise) => ({ name: exercise.name, sets: Array.from({ length: exercise.sets }, () => ({ reps: exercise.reps, weight: 0, completed: true })) }))); setIsNew(true); setActiveTab('log'); setShowTemplateModal(false); showToast('Template loaded.', 'success'); };
+  const removeTemplate = async (id: string) => { await deleteWorkoutTemplate(id); await loadTemplates(); showToast('Template deleted.', 'success'); };
 
-  const exportCsv = async () => { setIsExportingCsv(true); try { downloadFile(exportWorkoutsToCSV(workouts), `fittrack-workouts-${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv'); } finally { setIsExportingCsv(false); setShowExportDropdown(false); } };
-  const exportJson = async () => { setIsExportingJson(true); try { const data = await exportAllData(); downloadFile(JSON.stringify(data, null, 2), `fittrack-backup-${new Date().toISOString().slice(0, 10)}.json`, 'application/json'); } finally { setIsExportingJson(false); setShowExportDropdown(false); } };
+  const exportCsv = async () => { setIsExportingCsv(true); try { downloadFile(exportWorkoutsToCSV(workouts), `fittrack-workouts-${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv'); showToast('Workout CSV exported.', 'success'); } finally { setIsExportingCsv(false); setShowExportDropdown(false); } };
+  const exportJson = async () => { setIsExportingJson(true); try { const data = await exportAllData(); downloadFile(JSON.stringify(data, null, 2), `fittrack-backup-${new Date().toISOString().slice(0, 10)}.json`, 'application/json'); showToast('Backup exported.', 'success'); } finally { setIsExportingJson(false); setShowExportDropdown(false); } };
 
   const toggleSupersetSelection = (exerciseIdx: number) => setSupersetSelection((prev) => { const next = new Set(prev); if (next.has(exerciseIdx)) next.delete(exerciseIdx); else next.add(exerciseIdx); return next; });
-  const createSuperset = () => { const indices = Array.from(supersetSelection).sort((a, b) => a - b); if (indices.length < 2) return; setSupersets((prev) => [...prev, { exerciseIndices: indices }]); setSupersetSelection(new Set()); setShowSupersetSelect(false); };
+  const createSuperset = () => { const indices = Array.from(supersetSelection).sort((a, b) => a - b); if (indices.length < 2) { showToast('Select at least two exercises for a superset.', 'error'); return; } setSupersets((prev) => [...prev, { exerciseIndices: indices }]); setSupersetSelection(new Set()); setShowSupersetSelect(false); showToast('Superset created.', 'success'); };
   const removeSuperset = (groupIdx: number) => setSupersets((prev) => prev.filter((_, i) => i !== groupIdx));
   const getSupersetGroup = (exerciseIdx: number) => { for (let i = 0; i < supersets.length; i++) { if (supersets[i].exerciseIndices.includes(exerciseIdx)) return { groupIdx: i, group: supersets[i], itemIndex: supersets[i].exerciseIndices.indexOf(exerciseIdx) }; } return null; };
 

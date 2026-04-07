@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { getWorkouts, getWeightEntries, getPersonalRecords, getCustomExercises, getDailyNutritionSummary } from "@/lib/db";
-import { Dumbbell, Scale, Trophy, Flame, Settings, Utensils, AlertCircle } from "lucide-react";
+import { getWorkouts, getWeightEntries, getPersonalRecords, getCustomExercises, getDailyNutritionSummary, addReadinessLog, getReadinessLogs, getReadinessScore, getWeeklyReadinessSummary, generateId, type ReadinessLevel, type SleepLevel, type TrainingLevel } from "@/lib/db";
+import { Dumbbell, Scale, Trophy, Flame, Settings, Utensils, AlertCircle, BatteryCharging, HeartPulse, Moon, ActivitySquare, NotebookPen } from "lucide-react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
+import { useToast } from "@/app/providers";
 
-// Lazy load heavy chart components (reduces initial bundle by ~60KB)
 const WorkoutHeatmap = dynamic(() => import("@/components/WorkoutHeatmap"), {
   loading: () => <div className="h-24 bg-gray-800 rounded-lg animate-pulse" />,
   ssr: false,
@@ -42,11 +42,20 @@ interface Stats {
   todayProtein: number;
 }
 
+const readinessDefaults = {
+  energy: "Medium" as ReadinessLevel,
+  recovery: "Medium" as ReadinessLevel,
+  sleep: "OK" as SleepLevel,
+  training: "OK" as TrainingLevel,
+  notes: "",
+};
+
 function getTodayISO() {
   return new Date().toISOString().split('T')[0];
 }
 
 export default function DashboardPage() {
+  const { showToast } = useToast();
   const [stats, setStats] = useState<Stats>({
     latestWeight: null,
     totalWorkouts: 0,
@@ -60,21 +69,25 @@ export default function DashboardPage() {
   const [customExercises, setCustomExercises] = useState<CustomExercise[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [readinessDraft, setReadinessDraft] = useState(readinessDefaults);
+  const [todayReadinessScore, setTodayReadinessScore] = useState<number | null>(null);
+  const [coachSummary, setCoachSummary] = useState<{ avgReadiness: number; avgWeight: number; weightDelta: number; avgCalories: number; command: string } | null>(null);
 
   useEffect(() => {
     async function load() {
       try {
-        const [workouts, weightEntries, prs, customs, nutrition] = await Promise.all([
+        const [workouts, weightEntries, prs, customs, nutrition, readinessLogs, weeklySummary] = await Promise.all([
           getWorkouts(),
           getWeightEntries(1),
           getPersonalRecords(),
           getCustomExercises(),
           getDailyNutritionSummary(getTodayISO()),
+          getReadinessLogs(getTodayISO()),
+          getWeeklyReadinessSummary(),
         ]);
 
         setAllWorkouts(workouts as WorkoutData[]);
 
-        // Filter workouts from last 7 days for muscle chart
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
         const recent = (workouts as WorkoutData[]).filter(
@@ -83,7 +96,6 @@ export default function DashboardPage() {
         setRecentWorkouts(recent);
         setCustomExercises(customs as CustomExercise[]);
 
-        // Calculate streak
         let streak = 0;
         if (workouts.length > 0) {
           const dates = [...new Set(
@@ -116,6 +128,28 @@ export default function DashboardPage() {
           todayCalories: nutrition.totalCalories,
           todayProtein: nutrition.totalProtein,
         });
+
+        if (readinessLogs.length > 0) {
+          const log = readinessLogs[0];
+          setReadinessDraft({
+            energy: log.energy,
+            recovery: log.recovery,
+            sleep: log.sleep,
+            training: log.training,
+            notes: log.notes || "",
+          });
+          setTodayReadinessScore(getReadinessScore(log));
+        } else {
+          setTodayReadinessScore(null);
+        }
+
+        setCoachSummary({
+          avgReadiness: weeklySummary.avgReadiness,
+          avgWeight: weeklySummary.avgWeight,
+          weightDelta: weeklySummary.weightDelta,
+          avgCalories: weeklySummary.avgCalories,
+          command: weeklySummary.command,
+        });
       } catch (err) {
         console.error("Failed to load dashboard data:", err);
         setError("Failed to load data. Please refresh the page.");
@@ -133,6 +167,36 @@ export default function DashboardPage() {
     return "Good evening";
   };
 
+  const liveReadinessScore = Math.round((
+    (readinessDraft.energy === "High" ? 10 : readinessDraft.energy === "Medium" ? 7 : 4) +
+    (readinessDraft.recovery === "High" ? 10 : readinessDraft.recovery === "Medium" ? 7 : 4) +
+    (readinessDraft.sleep === "Good" ? 10 : readinessDraft.sleep === "OK" ? 7 : 4) +
+    (readinessDraft.training === "Great" ? 10 : readinessDraft.training === "OK" ? 7 : 4)
+  ) / 4);
+
+  const saveReadiness = async () => {
+    await addReadinessLog({
+      id: generateId(),
+      date: getTodayISO(),
+      energy: readinessDraft.energy,
+      recovery: readinessDraft.recovery,
+      sleep: readinessDraft.sleep,
+      training: readinessDraft.training,
+      notes: readinessDraft.notes.trim() || undefined,
+      createdAt: new Date().toISOString(),
+    });
+    setTodayReadinessScore(liveReadinessScore);
+    const weeklySummary = await getWeeklyReadinessSummary();
+    setCoachSummary({
+      avgReadiness: weeklySummary.avgReadiness,
+      avgWeight: weeklySummary.avgWeight,
+      weightDelta: weeklySummary.weightDelta,
+      avgCalories: weeklySummary.avgCalories,
+      command: weeklySummary.command,
+    });
+    showToast("Readiness check-in saved.", "success");
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -142,7 +206,7 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="px-4 pt-6 pb-24 animate-fade-in">
+    <div className="px-4 pt-6 pb-24 animate-fade-in max-w-lg mx-auto">
       <div className="mb-6">
         <p className="text-sm text-gray-500 mb-1">{greeting()}</p>
         <div className="flex items-center justify-between">
@@ -169,9 +233,7 @@ export default function DashboardPage() {
             <Scale size={16} className="text-blue-400" />
             <span className="text-xs text-gray-500">Weight</span>
           </div>
-          <p className="text-2xl font-bold">
-            {stats.latestWeight ? `${stats.latestWeight} lbs` : "--"}
-          </p>
+          <p className="text-2xl font-bold">{stats.latestWeight ? `${stats.latestWeight} lbs` : "--"}</p>
         </div>
 
         <div className="card">
@@ -187,9 +249,7 @@ export default function DashboardPage() {
             <Flame size={16} className="text-orange-400" />
             <span className="text-xs text-gray-500">Streak</span>
           </div>
-          <p className="text-2xl font-bold">
-            {stats.streak} day{stats.streak !== 1 ? "s" : ""}
-          </p>
+          <p className="text-2xl font-bold">{stats.streak} day{stats.streak !== 1 ? "s" : ""}</p>
         </div>
 
         <div className="card">
@@ -200,15 +260,83 @@ export default function DashboardPage() {
           {stats.latestPR ? (
             <div>
               <p className="text-2xl font-bold">{stats.latestPR.weight} lbs</p>
-              <p className="text-xs text-gray-500 mt-0.5">
-                {stats.latestPR.exercise} x{stats.latestPR.reps}
-              </p>
+              <p className="text-xs text-gray-500 mt-0.5">{stats.latestPR.exercise} x{stats.latestPR.reps}</p>
             </div>
           ) : (
             <p className="text-2xl font-bold">--</p>
           )}
         </div>
       </div>
+
+      <div className="card mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <BatteryCharging size={16} className="text-cyan-400" />
+            <h2 className="text-base font-semibold">Readiness Check-In</h2>
+          </div>
+          <span className="text-xs text-gray-500">Today</span>
+        </div>
+        <div className="grid grid-cols-2 gap-3 mb-3">
+          <div>
+            <label className="text-xs text-gray-400 mb-1 block flex items-center gap-1"><HeartPulse size={12} /> Energy</label>
+            <select className="input-field" value={readinessDraft.energy} onChange={(e) => setReadinessDraft((p) => ({ ...p, energy: e.target.value as ReadinessLevel }))}>
+              <option>Low</option><option>Medium</option><option>High</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-gray-400 mb-1 block flex items-center gap-1"><BatteryCharging size={12} /> Recovery</label>
+            <select className="input-field" value={readinessDraft.recovery} onChange={(e) => setReadinessDraft((p) => ({ ...p, recovery: e.target.value as ReadinessLevel }))}>
+              <option>Low</option><option>Medium</option><option>High</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-gray-400 mb-1 block flex items-center gap-1"><Moon size={12} /> Sleep</label>
+            <select className="input-field" value={readinessDraft.sleep} onChange={(e) => setReadinessDraft((p) => ({ ...p, sleep: e.target.value as SleepLevel }))}>
+              <option>Bad</option><option>OK</option><option>Good</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-gray-400 mb-1 block flex items-center gap-1"><ActivitySquare size={12} /> Training</label>
+            <select className="input-field" value={readinessDraft.training} onChange={(e) => setReadinessDraft((p) => ({ ...p, training: e.target.value as TrainingLevel }))}>
+              <option>Bad</option><option>OK</option><option>Great</option>
+            </select>
+          </div>
+        </div>
+        <div className="mb-3">
+          <label className="text-xs text-gray-400 mb-1 block flex items-center gap-1"><NotebookPen size={12} /> Notes</label>
+          <textarea className="input-field min-h-20 resize-none" value={readinessDraft.notes} onChange={(e) => setReadinessDraft((p) => ({ ...p, notes: e.target.value }))} placeholder="Optional notes about fatigue, stress, sleep, or training." />
+        </div>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs text-gray-500">Readiness score</p>
+            <p className="text-2xl font-bold text-cyan-300">{liveReadinessScore}/10</p>
+            {todayReadinessScore !== null && <p className="text-[11px] text-gray-500">Saved today: {todayReadinessScore}/10</p>}
+          </div>
+          <button onClick={saveReadiness} className="btn-primary">Save Check-In</button>
+        </div>
+      </div>
+
+      {coachSummary && (
+        <div className="card mb-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Utensils size={16} className="text-green-400" />
+              <h2 className="text-base font-semibold">Weekly Coach</h2>
+            </div>
+            <span className="text-xs text-gray-500">Last 7 days</span>
+          </div>
+          <div className="grid grid-cols-2 gap-3 mb-3 text-sm">
+            <div className="rounded-lg bg-gray-900/60 px-3 py-3"><p className="text-xs text-gray-500">Avg readiness</p><p className="text-xl font-bold">{coachSummary.avgReadiness || "—"}</p></div>
+            <div className="rounded-lg bg-gray-900/60 px-3 py-3"><p className="text-xs text-gray-500">Avg calories</p><p className="text-xl font-bold">{coachSummary.avgCalories || "—"}</p></div>
+            <div className="rounded-lg bg-gray-900/60 px-3 py-3"><p className="text-xs text-gray-500">Avg weight</p><p className="text-xl font-bold">{coachSummary.avgWeight ? coachSummary.avgWeight.toFixed(1) : "—"}</p></div>
+            <div className="rounded-lg bg-gray-900/60 px-3 py-3"><p className="text-xs text-gray-500">Weight delta</p><p className="text-xl font-bold">{coachSummary.weightDelta > 0 ? '+' : ''}{coachSummary.weightDelta || 0}</p></div>
+          </div>
+          <div className="rounded-xl border border-violet-500/20 bg-violet-500/10 px-4 py-3">
+            <p className="text-xs text-violet-200/80 mb-1">Coach command</p>
+            <p className="font-semibold text-violet-100">{coachSummary.command}</p>
+          </div>
+        </div>
+      )}
 
       <div className="card mb-4">
         <div className="flex items-center justify-between mb-3">
@@ -245,12 +373,8 @@ export default function DashboardPage() {
       <div className="card">
         <h2 className="text-base font-semibold mb-3">Quick Actions</h2>
         <div className="grid grid-cols-2 gap-2">
-          <Link href="/workouts" className="btn-primary text-center text-sm">
-            Log Workout
-          </Link>
-          <Link href="/nutrition" className="btn-secondary text-center text-sm">
-            Log Meal
-          </Link>
+          <Link href="/workouts" className="btn-primary text-center text-sm">Log Workout</Link>
+          <Link href="/nutrition" className="btn-secondary text-center text-sm">Log Macros</Link>
         </div>
       </div>
     </div>
