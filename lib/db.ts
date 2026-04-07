@@ -358,6 +358,9 @@ export function getReadinessScore(log: ReadinessLog): number {
 
 export async function addReadinessLog(log: ReadinessLog) { const db = await getDB(); await db.put('readinessLogs', log); }
 export async function getReadinessLogs(date?: string): Promise<ReadinessLog[]> { const db = await getDB(); if (date) return db.getAllFromIndex('readinessLogs', 'by-date', date); const all = await db.getAllFromIndex('readinessLogs', 'by-date'); return all.reverse(); }
+export async function getLatestReadinessLog(): Promise<ReadinessLog | null> { const logs = await getReadinessLogs(); return logs.length > 0 ? logs[0] : null; }
+export async function getRecentReadinessLogs(limit: number): Promise<ReadinessLog[]> { const logs = await getReadinessLogs(); return logs.slice(0, limit); }
+export async function getRecentMacroLogs(limit: number): Promise<MacroLog[]> { const logs = await getMacroLogs(); return logs.slice(0, limit); }
 export async function deleteReadinessLog(id: string) { const db = await getDB(); await db.delete('readinessLogs', id); }
 
 export function getCoachCommand(weightDelta: number, avgReadiness: number) {
@@ -369,16 +372,18 @@ export function getCoachCommand(weightDelta: number, avgReadiness: number) {
 }
 
 export async function getWeeklyReadinessSummary() {
-  const logs = await getReadinessLogs();
+  const [logs, weights, macroLogs] = await Promise.all([
+    getRecentReadinessLogs(14),
+    getWeightEntries(14),
+    getRecentMacroLogs(7),
+  ]);
   const currentWeek = logs.slice(0, 7);
   const previousWeek = logs.slice(7, 14);
-  const weights = await getWeightEntries(14);
-  const currentWeightAvg = currentWeek.length > 0 ? 0 : 0;
   const currentWeightWindow = weights.slice(0, 7).map((w) => Number(w.weight)).filter(Boolean);
   const previousWeightWindow = weights.slice(7, 14).map((w) => Number(w.weight)).filter(Boolean);
   const average = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
   const avgReadiness = Math.round(average(currentWeek.map(getReadinessScore)));
-  const avgCalories = Math.round(average((await getMacroLogs()).slice(0, 7).map((log) => Number(log.calories)).filter(Boolean)));
+  const avgCalories = Math.round(average(macroLogs.map((log) => Number(log.calories)).filter(Boolean)));
   const avgWeight = average(currentWeightWindow);
   const prevAvgWeight = average(previousWeightWindow);
   const weightDelta = avgWeight && prevAvgWeight ? Number((avgWeight - prevAvgWeight).toFixed(1)) : 0;

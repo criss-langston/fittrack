@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { getWorkouts, getWeightEntries, getPersonalRecords, getCustomExercises, getDailyNutritionSummary, addReadinessLog, getReadinessLogs, getReadinessScore, getWeeklyReadinessSummary, generateId, type ReadinessLevel, type SleepLevel, type TrainingLevel } from "@/lib/db";
+import { getWorkouts, getWeightEntries, getPersonalRecords, getCustomExercises, getDailyNutritionSummary, addReadinessLog, getLatestReadinessLog, getReadinessScore, getWeeklyReadinessSummary, generateId, type ReadinessLevel, type SleepLevel, type TrainingLevel } from "@/lib/db";
 import { Dumbbell, Scale, Trophy, Flame, Settings, Utensils, AlertCircle, BatteryCharging, HeartPulse, Moon, ActivitySquare, NotebookPen } from "lucide-react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -54,6 +54,22 @@ function getTodayISO() {
   return new Date().toISOString().split('T')[0];
 }
 
+function calculateWorkoutStreak(workouts: WorkoutData[]) {
+  if (workouts.length === 0) return 0;
+  const dates = [...new Set(workouts.map((w) => new Date(w.date).toDateString()))];
+  const today = new Date();
+  const todayStr = today.toDateString();
+  const yesterdayStr = new Date(Date.now() - 86400000).toDateString();
+  if (!dates.includes(todayStr) && !dates.includes(yesterdayStr)) return 0;
+  let streak = 0;
+  let checkDate = dates.includes(todayStr) ? today : new Date(Date.now() - 86400000);
+  while (dates.includes(checkDate.toDateString())) {
+    streak++;
+    checkDate = new Date(checkDate.getTime() - 86400000);
+  }
+  return streak;
+}
+
 export default function DashboardPage() {
   const { showToast } = useToast();
   const [stats, setStats] = useState<Stats>({
@@ -67,6 +83,7 @@ export default function DashboardPage() {
   const [allWorkouts, setAllWorkouts] = useState<WorkoutData[]>([]);
   const [recentWorkouts, setRecentWorkouts] = useState<WorkoutData[]>([]);
   const [customExercises, setCustomExercises] = useState<CustomExercise[]>([]);
+  const [chartsReady, setChartsReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [readinessDraft, setReadinessDraft] = useState(readinessDefaults);
@@ -74,54 +91,33 @@ export default function DashboardPage() {
   const [coachSummary, setCoachSummary] = useState<{ avgReadiness: number; avgWeight: number; weightDelta: number; avgCalories: number; command: string } | null>(null);
 
   useEffect(() => {
-    async function load() {
+    let cancelled = false;
+
+    async function loadPrimary() {
       try {
-        const [workouts, weightEntries, prs, customs, nutrition, readinessLogs, weeklySummary] = await Promise.all([
-          getWorkouts(),
+        const [workouts, weightEntries, prs, nutrition, readinessLog, weeklySummary] = await Promise.all([
+          getWorkouts(120),
           getWeightEntries(1),
           getPersonalRecords(),
-          getCustomExercises(),
           getDailyNutritionSummary(getTodayISO()),
-          getReadinessLogs(getTodayISO()),
+          getLatestReadinessLog(),
           getWeeklyReadinessSummary(),
         ]);
 
-        setAllWorkouts(workouts as WorkoutData[]);
+        if (cancelled) return;
 
+        const allWorkoutData = workouts as WorkoutData[];
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        const recent = (workouts as WorkoutData[]).filter(
-          (w) => new Date(w.date) >= sevenDaysAgo
-        );
+        const recent = allWorkoutData.filter((w) => new Date(w.date) >= sevenDaysAgo);
+        const sortedPRs = prs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+        setAllWorkouts(allWorkoutData);
         setRecentWorkouts(recent);
-        setCustomExercises(customs as CustomExercise[]);
-
-        let streak = 0;
-        if (workouts.length > 0) {
-          const dates = [...new Set(
-            workouts.map((w) => new Date(w.date).toDateString())
-          )];
-          const today = new Date();
-          const todayStr = today.toDateString();
-          const yesterdayStr = new Date(Date.now() - 86400000).toDateString();
-
-          if (dates.includes(todayStr) || dates.includes(yesterdayStr)) {
-            let checkDate = dates.includes(todayStr) ? today : new Date(Date.now() - 86400000);
-            while (dates.includes(checkDate.toDateString())) {
-              streak++;
-              checkDate = new Date(checkDate.getTime() - 86400000);
-            }
-          }
-        }
-
-        const sortedPRs = prs.sort(
-          (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
-        );
-
         setStats({
           latestWeight: weightEntries.length > 0 ? weightEntries[0].weight : null,
           totalWorkouts: workouts.length,
-          streak,
+          streak: calculateWorkoutStreak(allWorkoutData),
           latestPR: sortedPRs.length > 0
             ? { exercise: sortedPRs[0].exercise, weight: sortedPRs[0].weight, reps: sortedPRs[0].reps }
             : null,
@@ -129,16 +125,15 @@ export default function DashboardPage() {
           todayProtein: nutrition.totalProtein,
         });
 
-        if (readinessLogs.length > 0) {
-          const log = readinessLogs[0];
+        if (readinessLog && readinessLog.date === getTodayISO()) {
           setReadinessDraft({
-            energy: log.energy,
-            recovery: log.recovery,
-            sleep: log.sleep,
-            training: log.training,
-            notes: log.notes || "",
+            energy: readinessLog.energy,
+            recovery: readinessLog.recovery,
+            sleep: readinessLog.sleep,
+            training: readinessLog.training,
+            notes: readinessLog.notes || "",
           });
-          setTodayReadinessScore(getReadinessScore(log));
+          setTodayReadinessScore(getReadinessScore(readinessLog));
         } else {
           setTodayReadinessScore(null);
         }
@@ -152,12 +147,34 @@ export default function DashboardPage() {
         });
       } catch (err) {
         console.error("Failed to load dashboard data:", err);
-        setError("Failed to load data. Please refresh the page.");
+        if (!cancelled) setError("Failed to load data. Please refresh the page.");
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
-    load();
+
+    async function loadSecondary() {
+      try {
+        const customs = await getCustomExercises();
+        if (!cancelled) {
+          setCustomExercises(customs as CustomExercise[]);
+          if (typeof window !== "undefined") {
+            window.requestAnimationFrame(() => setChartsReady(true));
+          } else {
+            setChartsReady(true);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load secondary dashboard data:", err);
+      }
+    }
+
+    loadPrimary();
+    loadSecondary();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const greeting = () => {
@@ -360,10 +377,10 @@ export default function DashboardPage() {
 
       <div className="card mb-4">
         <h2 className="text-base font-semibold mb-3">Activity</h2>
-        <WorkoutHeatmap workouts={allWorkouts} />
+        {chartsReady ? <WorkoutHeatmap workouts={allWorkouts} /> : <div className="h-24 bg-gray-800 rounded-lg animate-pulse" />}
       </div>
 
-      {recentWorkouts.length > 0 && (
+      {chartsReady && recentWorkouts.length > 0 && customExercises.length > 0 && (
         <div className="card mb-4">
           <h2 className="text-base font-semibold mb-3">Muscle Balance (7 Days)</h2>
           <MuscleGroupChart workouts={recentWorkouts} customExercises={customExercises} />
