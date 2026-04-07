@@ -43,6 +43,17 @@ export interface Meal {
   createdAt: string;
 }
 
+export interface MacroLog {
+  id: string;
+  date: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  notes?: string;
+  createdAt: string;
+}
+
 export interface FoodItem {
   id: string;
   name: string;
@@ -196,6 +207,7 @@ interface FitTrackDB extends DBSchema {
   workoutTemplates: { key: string; value: WorkoutTemplate };
   measurements: { key: string; value: Measurement; indexes: { 'by-date': string } };
   meals: { key: string; value: Meal; indexes: { 'by-date': string; 'by-mealType': string } };
+  macroLogs: { key: string; value: MacroLog; indexes: { 'by-date': string } };
   foods: { key: string; value: FoodItem; indexes: { 'by-name': string } };
   userProfile: { key: string; value: UserProfile; indexes: { 'by-lastUpdated': string } };
   phases: { key: string; value: FitnessPhase; indexes: { 'by-startDate': string; 'by-endDate': string; 'by-type': string } };
@@ -205,7 +217,7 @@ let dbPromise: Promise<IDBPDatabase<FitTrackDB>> | null = null;
 
 export function getDB(): Promise<IDBPDatabase<FitTrackDB>> {
   if (!dbPromise) {
-    dbPromise = openDB<FitTrackDB>('fittrack', 9, {
+    dbPromise = openDB<FitTrackDB>('fittrack', 10, {
       upgrade(db, oldVersion) {
         if (oldVersion < 1) {
           const workoutStore = db.createObjectStore('workouts', { keyPath: 'id' });
@@ -234,6 +246,16 @@ export function getDB(): Promise<IDBPDatabase<FitTrackDB>> {
           mealStore.createIndex('by-mealType', 'mealType');
           const foodStore = db.createObjectStore('foods', { keyPath: 'id' });
           foodStore.createIndex('by-name', 'name');
+        }
+        if (oldVersion < 10) {
+          const macroLogStore = db.createObjectStore('macroLogs', { keyPath: 'id' });
+          macroLogStore.createIndex('by-date', 'date');
+          if ((db.objectStoreNames as DOMStringList).contains('meals')) {
+            (db as unknown as IDBDatabase).deleteObjectStore('meals');
+          }
+          if ((db.objectStoreNames as DOMStringList).contains('foods')) {
+            (db as unknown as IDBDatabase).deleteObjectStore('foods');
+          }
         }
         if (oldVersion < 7) {
           const userProfileStore = db.createObjectStore('userProfile', { keyPath: 'id' });
@@ -302,45 +324,24 @@ export async function addMeasurement(measurement: Measurement) { const db = awai
 export async function getMeasurements(limit?: number): Promise<Measurement[]> { const db = await getDB(); const all = await db.getAllFromIndex('measurements', 'by-date'); const sorted = all.reverse(); return limit ? sorted.slice(0, limit) : sorted; }
 export async function deleteMeasurement(id: string) { const db = await getDB(); await db.delete('measurements', id); }
 
-export async function addMeal(meal: Meal) { const db = await getDB(); await db.put('meals', meal); }
-export async function getMeals(date?: string): Promise<Meal[]> { const db = await getDB(); if (date) return db.getAllFromIndex('meals', 'by-date', date); const all = await db.getAllFromIndex('meals', 'by-date'); return all.reverse(); }
-export async function getMealsForDateRange(startDate: string, endDate: string): Promise<Meal[]> { const db = await getDB(); const all = await db.getAllFromIndex('meals', 'by-date'); return all.filter(m => m.date >= startDate && m.date <= endDate).reverse(); }
-export async function deleteMeal(id: string) { const db = await getDB(); await db.delete('meals', id); }
+export async function addMacroLog(log: MacroLog) { const db = await getDB(); await db.put('macroLogs', log); }
+export async function getMacroLogs(date?: string): Promise<MacroLog[]> { const db = await getDB(); if (date) return db.getAllFromIndex('macroLogs', 'by-date', date); const all = await db.getAllFromIndex('macroLogs', 'by-date'); return all.reverse(); }
+export async function deleteMacroLog(id: string) { const db = await getDB(); await db.delete('macroLogs', id); }
 export async function getDailyNutritionSummary(date: string): Promise<{ totalCalories: number; totalProtein: number; totalCarbs: number; totalFat: number; mealCount: number; byMealType: Record<string, { calories: number; protein: number; carbs: number; fat: number }> }> {
-  const meals = await getMeals(date);
-  const byMealType: Record<string, { calories: number; protein: number; carbs: number; fat: number }> = {};
-  let totalCalories = 0, totalProtein = 0, totalCarbs = 0, totalFat = 0;
-  for (const meal of meals) {
-    let mealCal = 0, mealPro = 0, mealCarb = 0, mealFat = 0;
-    for (const food of meal.foods) { mealCal += food.calories; mealPro += food.protein; mealCarb += food.carbs; mealFat += food.fat; }
-    totalCalories += mealCal; totalProtein += mealPro; totalCarbs += mealCarb; totalFat += mealFat;
-    byMealType[meal.mealType] = { calories: mealCal, protein: mealPro, carbs: mealCarb, fat: mealFat };
-  }
-  return { totalCalories, totalProtein, totalCarbs, totalFat, mealCount: meals.length, byMealType };
+  const logs = await getMacroLogs(date);
+  const totalCalories = logs.reduce((sum, log) => sum + log.calories, 0);
+  const totalProtein = logs.reduce((sum, log) => sum + log.protein, 0);
+  const totalCarbs = logs.reduce((sum, log) => sum + log.carbs, 0);
+  const totalFat = logs.reduce((sum, log) => sum + log.fat, 0);
+  return {
+    totalCalories,
+    totalProtein,
+    totalCarbs,
+    totalFat,
+    mealCount: logs.length,
+    byMealType: {},
+  };
 }
-
-const COMMON_FOODS: FoodItem[] = [
-  { id: 'common-1', name: 'Chicken Breast (6oz)', calories: 280, protein: 53, carbs: 0, fat: 6, servingSize: '6oz', isCustom: false, createdAt: '' },
-  { id: 'common-2', name: 'White Rice (1 cup)', calories: 206, protein: 4, carbs: 45, fat: 0, servingSize: '1 cup', isCustom: false, createdAt: '' },
-  { id: 'common-3', name: 'Brown Rice (1 cup)', calories: 216, protein: 5, carbs: 45, fat: 2, servingSize: '1 cup', isCustom: false, createdAt: '' },
-  { id: 'common-4', name: 'Egg (1 large)', calories: 72, protein: 6, carbs: 0, fat: 5, servingSize: '1 large', isCustom: false, createdAt: '' },
-  { id: 'common-5', name: 'Banana (1 medium)', calories: 105, protein: 1, carbs: 27, fat: 0, servingSize: '1 medium', isCustom: false, createdAt: '' },
-  { id: 'common-6', name: 'Oatmeal (1 cup)', calories: 154, protein: 5, carbs: 27, fat: 3, servingSize: '1 cup', isCustom: false, createdAt: '' },
-  { id: 'common-7', name: 'Greek Yogurt (170g)', calories: 100, protein: 17, carbs: 6, fat: 1, servingSize: '170g', isCustom: false, createdAt: '' },
-  { id: 'common-8', name: 'Whey Protein (1 scoop)', calories: 120, protein: 24, carbs: 3, fat: 1, servingSize: '1 scoop', isCustom: false, createdAt: '' },
-  { id: 'common-9', name: 'Salmon (6oz)', calories: 350, protein: 38, carbs: 0, fat: 20, servingSize: '6oz', isCustom: false, createdAt: '' },
-  { id: 'common-10', name: 'Sweet Potato (1 medium)', calories: 103, protein: 2, carbs: 24, fat: 0, servingSize: '1 medium', isCustom: false, createdAt: '' },
-  { id: 'common-11', name: 'Broccoli (1 cup)', calories: 55, protein: 4, carbs: 11, fat: 1, servingSize: '1 cup', isCustom: false, createdAt: '' },
-  { id: 'common-12', name: 'Avocado (1/2)', calories: 120, protein: 1, carbs: 6, fat: 11, servingSize: '1/2', isCustom: false, createdAt: '' },
-  { id: 'common-13', name: 'Almonds (1oz)', calories: 164, protein: 6, carbs: 6, fat: 14, servingSize: '1oz', isCustom: false, createdAt: '' },
-  { id: 'common-14', name: 'Whole Wheat Bread (1 slice)', calories: 81, protein: 4, carbs: 14, fat: 1, servingSize: '1 slice', isCustom: false, createdAt: '' },
-  { id: 'common-15', name: 'Peanut Butter (2 tbsp)', calories: 190, protein: 7, carbs: 7, fat: 16, servingSize: '2 tbsp', isCustom: false, createdAt: '' },
-];
-
-export async function addFoodItem(food: FoodItem) { const db = await getDB(); await db.put('foods', food); }
-export async function getFoodItems(): Promise<FoodItem[]> { const db = await getDB(); const custom = await db.getAll('foods'); return [...COMMON_FOODS, ...custom].sort((a, b) => a.name.localeCompare(b.name)); }
-export async function deleteFoodItem(id: string) { const db = await getDB(); await db.delete('foods', id); }
-export async function searchFoods(query: string): Promise<FoodItem[]> { const all = await getFoodItems(); const lower = query.toLowerCase(); return all.filter(f => f.name.toLowerCase().includes(lower)); }
 
 export async function getDefaultUserProfile(): Promise<UserProfile> {
   const existing = await getUserProfile();
@@ -386,7 +387,7 @@ export async function getExerciseHistory(exerciseName: string, limit: number): P
   return results;
 }
 
-const STORE_NAMES = ['workouts', 'weightLog', 'photos', 'programs', 'personalRecords', 'customExercises', 'workoutTemplates', 'measurements', 'meals', 'foods', 'userProfile', 'phases'] as const;
+const STORE_NAMES = ['workouts', 'weightLog', 'photos', 'programs', 'personalRecords', 'customExercises', 'workoutTemplates', 'measurements', 'macroLogs', 'userProfile', 'phases'] as const;
 type StoreName = typeof STORE_NAMES[number];
 
 export interface FitTrackBackup {

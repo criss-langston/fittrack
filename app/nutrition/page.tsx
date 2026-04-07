@@ -2,19 +2,15 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  addMeal,
-  getMeals,
-  deleteMeal,
+  addMacroLog,
+  getMacroLogs,
+  deleteMacroLog,
   getDailyNutritionSummary,
-  searchFoods,
-  addFoodItem,
   generateId,
-  type Meal,
-  type FoodEntry,
-  type FoodItem,
   getDefaultUserProfile,
   updateUserProfile,
   type UserProfile,
+  type MacroLog,
 } from "@/lib/db";
 import {
   Plus,
@@ -24,10 +20,10 @@ import {
   Beef,
   Wheat,
   Droplet,
-  Search,
   ChevronDown,
   ChevronUp,
   Target,
+  PencilLine,
 } from "lucide-react";
 
 function formatDate(iso: string) {
@@ -40,18 +36,14 @@ function progressColor(consumed: number, target: number) { return target > 0 && 
 
 export default function NutritionPage() {
   const [selectedDate, setSelectedDate] = useState(getTodayISO());
-  const [entries, setEntries] = useState<Meal[]>([]);
+  const [entries, setEntries] = useState<MacroLog[]>([]);
   const [summary, setSummary] = useState({ totalCalories: 0, totalProtein: 0, totalCarbs: 0, totalFat: 0, mealCount: 0 });
   const [weeklyAvg, setWeeklyAvg] = useState({ calories: 0, protein: 0, carbs: 0, fat: 0 });
   const [loading, setLoading] = useState(true);
   const [showAddEntry, setShowAddEntry] = useState(false);
-  const [foodSearch, setFoodSearch] = useState('');
-  const [foodResults, setFoodResults] = useState<FoodItem[]>([]);
-  const [selectedFoods, setSelectedFoods] = useState<FoodEntry[]>([]);
-  const [showCustomFood, setShowCustomFood] = useState(false);
-  const [customFood, setCustomFood] = useState({ name: '', calories: 0, protein: 0, carbs: 0, fat: 0, servingSize: '' });
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [targets, setTargets] = useState({ targetCalories: 2200, targetProtein: 150, targetCarbs: 250, targetFats: 65 });
+  const [draft, setDraft] = useState({ calories: '', protein: '', carbs: '', fat: '', notes: '' });
 
   const loadTargets = useCallback(async () => {
     const p = await getDefaultUserProfile();
@@ -66,8 +58,8 @@ export default function NutritionPage() {
 
   const loadDay = useCallback(async (date: string) => {
     setLoading(true);
-    const [dayMeals, daySummary] = await Promise.all([getMeals(date), getDailyNutritionSummary(date)]);
-    setEntries(dayMeals);
+    const [dayLogs, daySummary] = await Promise.all([getMacroLogs(date), getDailyNutritionSummary(date)]);
+    setEntries(dayLogs);
     setSummary(daySummary);
     setLoading(false);
   }, []);
@@ -77,7 +69,13 @@ export default function NutritionPage() {
     let totalCal = 0, totalPro = 0, totalCarb = 0, totalFat = 0, daysWithData = 0;
     for (const date of weekDates) {
       const s = await getDailyNutritionSummary(date);
-      if (s.mealCount > 0) { totalCal += s.totalCalories; totalPro += s.totalProtein; totalCarb += s.totalCarbs; totalFat += s.totalFat; daysWithData++; }
+      if (s.mealCount > 0) {
+        totalCal += s.totalCalories;
+        totalPro += s.totalProtein;
+        totalCarb += s.totalCarbs;
+        totalFat += s.totalFat;
+        daysWithData++;
+      }
     }
     setWeeklyAvg({
       calories: daysWithData > 0 ? Math.round(totalCal / daysWithData) : 0,
@@ -89,34 +87,6 @@ export default function NutritionPage() {
 
   useEffect(() => { loadTargets(); }, [loadTargets]);
   useEffect(() => { loadDay(selectedDate); loadWeeklyAvg(); }, [selectedDate, loadDay, loadWeeklyAvg]);
-  useEffect(() => {
-    if (foodSearch.length >= 2) searchFoods(foodSearch).then(setFoodResults); else setFoodResults([]);
-  }, [foodSearch]);
-
-  const addFoodToMeal = (food: FoodEntry) => {
-    setSelectedFoods(prev => [...prev, { ...food, quantity: food.quantity || 1 }]);
-    setFoodSearch(''); setFoodResults([]);
-  };
-
-  const updateSelectedFood = (idx: number, field: keyof FoodEntry, value: number) => {
-    setSelectedFoods(prev => {
-      const copy = [...prev];
-      const food = { ...copy[idx] };
-      const originalQuantity = food.quantity || 1;
-      (food as Record<string, unknown>)[field] = value;
-      if (field === 'quantity') {
-        const ratio = value / originalQuantity;
-        food.calories = Math.round(food.calories * ratio);
-        food.protein = Math.round(food.protein * ratio * 10) / 10;
-        food.carbs = Math.round(food.carbs * ratio * 10) / 10;
-        food.fat = Math.round(food.fat * ratio * 10) / 10;
-      }
-      copy[idx] = food;
-      return copy;
-    });
-  };
-
-  const removeSelectedFood = (idx: number) => setSelectedFoods(prev => prev.filter((_, i) => i !== idx));
 
   const saveTargets = async () => {
     const updated = await updateUserProfile(targets);
@@ -124,27 +94,33 @@ export default function NutritionPage() {
   };
 
   const saveEntry = async () => {
-    if (selectedFoods.length === 0) return;
-    const meal: Meal = { id: generateId(), date: selectedDate, mealType: 'snack', foods: selectedFoods, createdAt: new Date().toISOString() };
-    await addMeal(meal);
-    setShowAddEntry(false); setSelectedFoods([]); loadDay(selectedDate); loadWeeklyAvg();
+    const calories = Number(draft.calories) || 0;
+    const protein = Number(draft.protein) || 0;
+    const carbs = Number(draft.carbs) || 0;
+    const fat = Number(draft.fat) || 0;
+    if (calories <= 0 && protein <= 0 && carbs <= 0 && fat <= 0) return;
+    await addMacroLog({
+      id: generateId(),
+      date: selectedDate,
+      calories,
+      protein,
+      carbs,
+      fat,
+      notes: draft.notes.trim() || undefined,
+      createdAt: new Date().toISOString(),
+    });
+    setDraft({ calories: '', protein: '', carbs: '', fat: '', notes: '' });
+    setShowAddEntry(false);
+    loadDay(selectedDate);
+    loadWeeklyAvg();
   };
 
-  const saveCustomFood = async () => {
-    if (!customFood.name.trim()) return;
-    const food: FoodItem = { id: generateId(), name: customFood.name.trim(), calories: customFood.calories, protein: customFood.protein, carbs: customFood.carbs, fat: customFood.fat, servingSize: customFood.servingSize || '1 serving', isCustom: true, createdAt: new Date().toISOString() };
-    await addFoodItem(food);
-    setShowCustomFood(false);
-    setCustomFood({ name: '', calories: 0, protein: 0, carbs: 0, fat: 0, servingSize: '' });
-  };
-
-  const handleDeleteEntry = async (id: string) => { await deleteMeal(id); loadDay(selectedDate); loadWeeklyAvg(); };
+  const handleDeleteEntry = async (id: string) => { await deleteMacroLog(id); loadDay(selectedDate); loadWeeklyAvg(); };
   const isToday = selectedDate === getTodayISO();
   const isYesterday = selectedDate === getYesterdayISO();
   const dateLabel = isToday ? 'Today' : isYesterday ? 'Yesterday' : formatDate(selectedDate);
   const goToPrevDay = () => { const d = new Date(selectedDate); d.setDate(d.getDate() - 1); setSelectedDate(d.toISOString().split('T')[0]); };
   const goToNextDay = () => { const next = new Date(selectedDate); const today = new Date(); next.setDate(next.getDate() + 1); if (next <= today) setSelectedDate(next.toISOString().split('T')[0]); };
-  const selectedTotal = selectedFoods.reduce((acc, f) => ({ calories: acc.calories + f.calories, protein: acc.protein + f.protein, carbs: acc.carbs + f.carbs, fat: acc.fat + f.fat }), { calories: 0, protein: 0, carbs: 0, fat: 0 });
 
   const cards = [
     { key: 'cal', label: 'Calories', value: summary.totalCalories, target: targets.targetCalories, unit: '', icon: Flame, iconClass: 'text-orange-400' },
@@ -198,41 +174,45 @@ export default function NutritionPage() {
             </div>
           </div>
 
-          <div className="flex gap-2 mb-4">
-            <button onClick={() => setShowAddEntry((v) => !v)} className="btn-primary flex-1 flex items-center justify-center gap-2"><Plus size={16} /> Add Food</button>
-            <button onClick={() => setShowCustomFood((v) => !v)} className="btn-secondary flex-1">Custom Food</button>
+          <div className="mb-4">
+            <button onClick={() => setShowAddEntry((v) => !v)} className="btn-primary w-full flex items-center justify-center gap-2"><Plus size={16} /> Log Macros</button>
           </div>
 
           {showAddEntry && (
             <div className="card mb-4 space-y-4">
-              <div className="flex items-center justify-between"><h2 className="font-semibold">Add Daily Foods</h2><button onClick={() => { setShowAddEntry(false); setSelectedFoods([]); }} className="text-gray-400 hover:text-white"><X size={18} /></button></div>
-              <div>
-                <label className="text-xs text-gray-400 mb-1 block">Search foods</label>
-                <div className="relative"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" /><input className="input-field pl-10" placeholder="Chicken, rice, yogurt..." value={foodSearch} onChange={(e) => setFoodSearch(e.target.value)} /></div>
-                {foodResults.length > 0 && <div className="mt-2 max-h-48 overflow-y-auto space-y-2">{foodResults.map((food) => <button key={food.id} onClick={() => addFoodToMeal(food)} className="w-full text-left bg-gray-800 rounded-lg px-3 py-2 hover:bg-gray-700"><div className="flex items-center justify-between"><span className="text-sm font-medium">{food.name}</span><span className="text-xs text-gray-500">{food.calories} cal</span></div><p className="text-xs text-gray-500">P {food.protein} • C {food.carbs} • F {food.fat}</p></button>)}</div>}
+              <div className="flex items-center justify-between"><h2 className="font-semibold">Log Daily Macros</h2><button onClick={() => { setShowAddEntry(false); setDraft({ calories: '', protein: '', carbs: '', fat: '', notes: '' }); }} className="text-gray-400 hover:text-white"><X size={18} /></button></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className="text-xs text-gray-400 mb-1 block">Calories</label><input type="number" className="input-field" value={draft.calories} onChange={(e) => setDraft((p) => ({ ...p, calories: e.target.value }))} /></div>
+                <div><label className="text-xs text-gray-400 mb-1 block">Protein (g)</label><input type="number" className="input-field" value={draft.protein} onChange={(e) => setDraft((p) => ({ ...p, protein: e.target.value }))} /></div>
+                <div><label className="text-xs text-gray-400 mb-1 block">Carbs (g)</label><input type="number" className="input-field" value={draft.carbs} onChange={(e) => setDraft((p) => ({ ...p, carbs: e.target.value }))} /></div>
+                <div><label className="text-xs text-gray-400 mb-1 block">Fat (g)</label><input type="number" className="input-field" value={draft.fat} onChange={(e) => setDraft((p) => ({ ...p, fat: e.target.value }))} /></div>
               </div>
-              {selectedFoods.length > 0 && <div className="space-y-3">{selectedFoods.map((food, idx) => <div key={idx} className="rounded-xl border border-gray-800 p-3"><div className="flex items-start justify-between gap-3"><div><p className="font-medium text-sm">{food.name}</p><p className="text-xs text-gray-500">{food.servingSize || '1 serving'}</p></div><button onClick={() => removeSelectedFood(idx)} className="text-gray-500 hover:text-red-400"><Trash2 size={16} /></button></div><div className="grid grid-cols-5 gap-2 mt-3 text-xs"><div><label className="text-gray-500 block mb-1">Qty</label><input type="number" className="input-field !py-2 text-center" value={food.quantity || 1} onChange={(e) => updateSelectedFood(idx, 'quantity', Number(e.target.value) || 1)} /></div><div><label className="text-gray-500 block mb-1">Cal</label><input type="number" className="input-field !py-2 text-center" value={food.calories} onChange={(e) => updateSelectedFood(idx, 'calories', Number(e.target.value) || 0)} /></div><div><label className="text-gray-500 block mb-1">P</label><input type="number" className="input-field !py-2 text-center" value={food.protein} onChange={(e) => updateSelectedFood(idx, 'protein', Number(e.target.value) || 0)} /></div><div><label className="text-gray-500 block mb-1">C</label><input type="number" className="input-field !py-2 text-center" value={food.carbs} onChange={(e) => updateSelectedFood(idx, 'carbs', Number(e.target.value) || 0)} /></div><div><label className="text-gray-500 block mb-1">F</label><input type="number" className="input-field !py-2 text-center" value={food.fat} onChange={(e) => updateSelectedFood(idx, 'fat', Number(e.target.value) || 0)} /></div></div></div>)}</div>}
-              {selectedFoods.length > 0 && <div className="rounded-xl bg-gray-900/60 p-3 text-sm"><div className="grid grid-cols-4 gap-2 text-center"><div><p className="text-gray-500">Cal</p><p className="font-semibold">{selectedTotal.calories}</p></div><div><p className="text-gray-500">P</p><p className="font-semibold">{selectedTotal.protein}g</p></div><div><p className="text-gray-500">C</p><p className="font-semibold">{selectedTotal.carbs}g</p></div><div><p className="text-gray-500">F</p><p className="font-semibold">{selectedTotal.fat}g</p></div></div></div>}
-              <button onClick={saveEntry} disabled={selectedFoods.length === 0} className="btn-primary w-full disabled:opacity-40">Save Daily Entry</button>
-            </div>
-          )}
-
-          {showCustomFood && (
-            <div className="card mb-4 space-y-3">
-              <div className="flex items-center justify-between"><h2 className="font-semibold">Create Custom Food</h2><button onClick={() => setShowCustomFood(false)} className="text-gray-400 hover:text-white"><X size={18} /></button></div>
-              <input className="input-field" placeholder="Food name" value={customFood.name} onChange={(e) => setCustomFood((p) => ({ ...p, name: e.target.value }))} />
-              <input className="input-field" placeholder="Serving size" value={customFood.servingSize} onChange={(e) => setCustomFood((p) => ({ ...p, servingSize: e.target.value }))} />
-              <div className="grid grid-cols-2 gap-3"><input type="number" className="input-field" placeholder="Calories" value={customFood.calories} onChange={(e) => setCustomFood((p) => ({ ...p, calories: Number(e.target.value) || 0 }))} /><input type="number" className="input-field" placeholder="Protein" value={customFood.protein} onChange={(e) => setCustomFood((p) => ({ ...p, protein: Number(e.target.value) || 0 }))} /><input type="number" className="input-field" placeholder="Carbs" value={customFood.carbs} onChange={(e) => setCustomFood((p) => ({ ...p, carbs: Number(e.target.value) || 0 }))} /><input type="number" className="input-field" placeholder="Fat" value={customFood.fat} onChange={(e) => setCustomFood((p) => ({ ...p, fat: Number(e.target.value) || 0 }))} /></div>
-              <button onClick={saveCustomFood} className="btn-primary w-full">Save Custom Food</button>
+              <div>
+                <label className="text-xs text-gray-400 mb-1 block">Notes (optional)</label>
+                <textarea className="input-field min-h-20 resize-none" placeholder="Optional note for this macro entry" value={draft.notes} onChange={(e) => setDraft((p) => ({ ...p, notes: e.target.value }))} />
+              </div>
+              <button onClick={saveEntry} className="btn-primary w-full">Save Macro Entry</button>
             </div>
           )}
 
           <div className="space-y-3">
-            {entries.length === 0 && <div className="card text-center py-10 text-gray-500 text-sm">No foods logged for this day yet.</div>}
+            {entries.length === 0 && <div className="card text-center py-10 text-gray-500 text-sm">No macro entries logged for this day yet.</div>}
             {entries.map((entry) => (
               <div key={entry.id} className="card">
-                <div className="flex items-center justify-between mb-3"><div><p className="font-semibold">Daily Entry</p><p className="text-xs text-gray-500">{new Date(entry.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</p></div><button onClick={() => handleDeleteEntry(entry.id)} className="text-gray-500 hover:text-red-400"><Trash2 size={16} /></button></div>
-                <div className="space-y-2">{entry.foods.map((food, idx) => <div key={idx} className="flex items-center justify-between rounded-lg bg-gray-800/70 px-3 py-2"><div><p className="text-sm font-medium">{food.name}</p><p className="text-xs text-gray-500">{food.servingSize || '1 serving'}{food.quantity ? ` × ${food.quantity}` : ''}</p></div><div className="text-right text-xs text-gray-400"><p>{food.calories} cal</p><p>P {food.protein} · C {food.carbs} · F {food.fat}</p></div></div>)}</div>
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <p className="font-semibold flex items-center gap-2"><PencilLine size={14} className="text-violet-400" /> Macro Entry</p>
+                    <p className="text-xs text-gray-500">{new Date(entry.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</p>
+                  </div>
+                  <button onClick={() => handleDeleteEntry(entry.id)} className="text-gray-500 hover:text-red-400"><Trash2 size={16} /></button>
+                </div>
+                <div className="grid grid-cols-4 gap-2 text-center text-sm">
+                  <div className="rounded-lg bg-gray-800/70 px-3 py-2"><p className="text-xs text-gray-500">Cal</p><p className="font-semibold">{entry.calories}</p></div>
+                  <div className="rounded-lg bg-gray-800/70 px-3 py-2"><p className="text-xs text-gray-500">P</p><p className="font-semibold">{entry.protein}g</p></div>
+                  <div className="rounded-lg bg-gray-800/70 px-3 py-2"><p className="text-xs text-gray-500">C</p><p className="font-semibold">{entry.carbs}g</p></div>
+                  <div className="rounded-lg bg-gray-800/70 px-3 py-2"><p className="text-xs text-gray-500">F</p><p className="font-semibold">{entry.fat}g</p></div>
+                </div>
+                {entry.notes && <p className="text-xs text-gray-500 mt-3">{entry.notes}</p>}
               </div>
             ))}
           </div>
