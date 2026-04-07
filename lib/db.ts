@@ -56,7 +56,7 @@ export interface MacroLog {
 
 export type ReadinessLevel = 'Low' | 'Medium' | 'High';
 export type SleepLevel = 'Bad' | 'OK' | 'Good';
-export type TrainingLevel = 'Bad' | 'OK' | 'Great';
+export type TrainingLevel = 'Bad' | 'OK' | 'Great' | 'Rest day';
 
 export interface ReadinessLog {
   id: string;
@@ -352,7 +352,7 @@ export async function deleteMacroLog(id: string) { const db = await getDB(); awa
 export function getReadinessScore(log: ReadinessLog): number {
   const scoreLevel = (value: ReadinessLevel) => value === 'High' ? 10 : value === 'Medium' ? 7 : 4;
   const scoreSleep = (value: SleepLevel) => value === 'Good' ? 10 : value === 'OK' ? 7 : 4;
-  const scoreTraining = (value: TrainingLevel) => value === 'Great' ? 10 : value === 'OK' ? 7 : 4;
+  const scoreTraining = (value: TrainingLevel) => value === 'Great' ? 10 : value === 'OK' ? 7 : value === 'Rest day' ? 7 : 4;
   return Math.round((scoreLevel(log.energy) + scoreLevel(log.recovery) + scoreSleep(log.sleep) + scoreTraining(log.training)) / 4);
 }
 

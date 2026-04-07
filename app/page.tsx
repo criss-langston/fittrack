@@ -171,7 +171,7 @@ export default function DashboardPage() {
     (readinessDraft.energy === "High" ? 10 : readinessDraft.energy === "Medium" ? 7 : 4) +
     (readinessDraft.recovery === "High" ? 10 : readinessDraft.recovery === "Medium" ? 7 : 4) +
     (readinessDraft.sleep === "Good" ? 10 : readinessDraft.sleep === "OK" ? 7 : 4) +
-    (readinessDraft.training === "Great" ? 10 : readinessDraft.training === "OK" ? 7 : 4)
+    (readinessDraft.training === "Great" ? 10 : readinessDraft.training === "OK" ? 7 : readinessDraft.training === "Rest day" ? 7 : 4)
   ) / 4);
 
   const saveReadiness = async () => {
@@ -298,7 +298,7 @@ export default function DashboardPage() {
           <div>
             <label className="text-xs text-gray-400 mb-1 block flex items-center gap-1"><ActivitySquare size={12} /> Training</label>
             <select className="input-field" value={readinessDraft.training} onChange={(e) => setReadinessDraft((p) => ({ ...p, training: e.target.value as TrainingLevel }))}>
-              <option>Bad</option><option>OK</option><option>Great</option>
+              <option>Bad</option><option>OK</option><option>Great</option><option>Rest day</option>
             </select>
           </div>
         </div>
