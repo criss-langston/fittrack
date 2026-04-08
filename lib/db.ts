@@ -451,19 +451,124 @@ export async function getRecentReadinessLogs(limit: number): Promise<ReadinessLo
 export async function getRecentMacroLogs(limit: number): Promise<MacroLog[]> { const logs = await getMacroLogs(); return logs.slice(0, limit); }
 export async function deleteReadinessLog(id: string) { const db = await getDB(); await db.delete('readinessLogs', id); }
 
-export function getCoachCommand(weightDelta: number, avgReadiness: number) {
-  if (weightDelta === 0 && avgReadiness >= 7) return 'Recomp working — hold steady';
-  if (weightDelta === 0 && avgReadiness < 7) return 'Increase calories (+150 to 250)';
-  if (weightDelta > 1) return 'Reduce calories (-150 to 200)';
-  if (avgReadiness < 6) return 'Recover first (sleep / reduce volume)';
-  return 'Stay the course';
+export interface CoachSummary {
+  currentWeek: ReadinessLog[];
+  previousWeek: ReadinessLog[];
+  avgReadiness: number;
+  previousAvgReadiness: number;
+  avgCalories: number;
+  calorieTarget: number;
+  calorieDelta: number;
+  avgWeight: number;
+  prevAvgWeight: number;
+  weightDelta: number;
+  workoutCount: number;
+  plannedCount: number;
+  adherencePercent: number;
+  activePhase: FitnessPhase | null;
+  command: string;
+  why: string[];
+  actions: string[];
+  confidence: 'low' | 'medium' | 'high';
 }
 
-export async function getWeeklyReadinessSummary() {
-  const [logs, weights, macroLogs] = await Promise.all([
+function getActivePhaseForDate(phases: FitnessPhase[], date: string) {
+  const matching = phases.filter((phase) => phase.startDate <= date && phase.endDate >= date);
+  const subPhase = matching.find((phase) => phase.parentPhaseId);
+  return subPhase || matching[0] || null;
+}
+
+function getPhaseWeightTargetRange(phaseType?: PhaseType | null) {
+  if (phaseType === 'bulk') return { min: 0.25, max: 0.75 };
+  if (phaseType === 'cut') return { min: -1.5, max: -0.4 };
+  if (phaseType === 'maintenance') return { min: -0.3, max: 0.3 };
+  return { min: -0.3, max: 0.3 };
+}
+
+type CoachInput = Pick<CoachSummary, 'currentWeek' | 'previousWeek' | 'avgReadiness' | 'previousAvgReadiness' | 'avgCalories' | 'calorieTarget' | 'calorieDelta' | 'avgWeight' | 'prevAvgWeight' | 'weightDelta' | 'workoutCount' | 'plannedCount' | 'adherencePercent' | 'activePhase'>;
+
+export function getCoachCommand(summary: CoachInput) {
+  const phaseType = summary.activePhase?.type || 'maintenance';
+  const target = getPhaseWeightTargetRange(phaseType);
+  const why: string[] = [];
+  const actions: string[] = [];
+  let command = 'Stay the course';
+  let confidence: CoachSummary['confidence'] = 'medium';
+
+  if (summary.workoutCount < 2 && summary.plannedCount >= 3) {
+    command = 'Hit your planned sessions first';
+    why.push('training consistency is low versus your recurring plan');
+    actions.push('complete your next scheduled workouts before changing calories');
+  } else if (summary.avgReadiness < 6 || summary.avgReadiness < summary.previousAvgReadiness - 1) {
+    command = 'Recover first';
+    why.push('readiness is low or trending down');
+    actions.push('prioritize sleep and reduce training volume slightly this week');
+  } else if (phaseType === 'bulk') {
+    if (summary.weightDelta < target.min) {
+      command = 'Increase calories slightly';
+      why.push('weight gain is below your bulk target range');
+      if (summary.calorieDelta < 0) why.push('average calories are below target');
+      actions.push('add 150–200 daily calories and reassess next week');
+    } else if (summary.weightDelta > target.max) {
+      command = 'Slow the bulk slightly';
+      why.push('weight gain is above your target range');
+      actions.push('reduce calories by 100–150 and keep protein high');
+    } else {
+      command = 'Bulk is on track';
+      why.push('weight gain is within your target range');
+      actions.push('hold calories steady and keep training hard');
+    }
+  } else if (phaseType === 'cut') {
+    if (summary.weightDelta > target.max) {
+      command = 'Tighten the cut';
+      why.push('weight is not dropping fast enough for a cut');
+      if (summary.calorieDelta > 0) why.push('average calories are above target');
+      actions.push('reduce calories by 150–200 or increase activity slightly');
+    } else if (summary.weightDelta < target.min) {
+      command = 'Ease the cut a bit';
+      why.push('weight loss is faster than target');
+      actions.push('increase calories slightly to protect recovery and performance');
+    } else {
+      command = 'Cut is on track';
+      why.push('weight loss is within your target range');
+      actions.push('stay consistent and keep protein high');
+    }
+  } else {
+    if (summary.weightDelta >= target.min && summary.weightDelta <= target.max && summary.avgReadiness >= 7) {
+      command = 'Maintenance is working';
+      why.push('bodyweight is stable and readiness is solid');
+      actions.push('keep calories and training steady');
+    } else if (summary.calorieDelta < -150 && summary.avgReadiness < 7) {
+      command = 'Increase calories slightly';
+      why.push('you are eating below target and recovery looks limited');
+      actions.push('add 100–150 calories and reassess in 7 days');
+    } else {
+      command = 'Stay the course';
+      why.push('current trends do not suggest a major adjustment');
+      actions.push('keep logging and reassess next week');
+    }
+  }
+
+  if (summary.currentWeek.length < 4 || summary.avgWeight === 0 || summary.prevAvgWeight === 0) {
+    confidence = 'low';
+    actions.push('log more weigh-ins and readiness check-ins for stronger guidance');
+  } else if (summary.currentWeek.length >= 6 && summary.workoutCount >= 3) {
+    confidence = 'high';
+  }
+
+  return { command, why, actions, confidence };
+}
+
+export async function getWeeklyReadinessSummary(): Promise<CoachSummary> {
+  const today = new Date().toISOString().slice(0, 10);
+  const [logs, weights, macroLogs, profile, phases, workouts, plans] = await Promise.all([
     getRecentReadinessLogs(14),
     getWeightEntries(14),
     getRecentMacroLogs(7),
+    getDefaultUserProfile(),
+    getPhases(),
+    getWorkouts(30),
+    getRecurringWorkoutPlans(),
   ]);
   const currentWeek = logs.slice(0, 7);
   const previousWeek = logs.slice(7, 14);
@@ -471,19 +576,39 @@ export async function getWeeklyReadinessSummary() {
   const previousWeightWindow = weights.slice(7, 14).map((w) => Number(w.weight)).filter(Boolean);
   const average = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
   const avgReadiness = Math.round(average(currentWeek.map(getReadinessScore)));
+  const previousAvgReadiness = Math.round(average(previousWeek.map(getReadinessScore)));
   const avgCalories = Math.round(average(macroLogs.map((log) => Number(log.calories)).filter(Boolean)));
   const avgWeight = average(currentWeightWindow);
   const prevAvgWeight = average(previousWeightWindow);
   const weightDelta = avgWeight && prevAvgWeight ? Number((avgWeight - prevAvgWeight).toFixed(1)) : 0;
-  return {
+  const activePhase = getActivePhaseForDate(phases, today);
+  const plannedCount = plans.filter((plan) => plan.isActive && (!plan.endDate || plan.endDate >= today) && plan.startDate <= today).length;
+  const workoutCount = workouts.filter((workout) => new Date(workout.date) >= new Date(Date.now() - 7 * 86400000)).length;
+  const adherencePercent = plannedCount > 0 ? Math.min(100, Math.round((workoutCount / plannedCount) * 100)) : 100;
+  const calorieTarget = profile.targetCalories || 0;
+  const calorieDelta = avgCalories && calorieTarget ? avgCalories - calorieTarget : 0;
+
+  const baseSummary: CoachInput = {
     currentWeek,
     previousWeek,
     avgReadiness,
+    previousAvgReadiness,
     avgCalories,
+    calorieTarget,
+    calorieDelta,
     avgWeight,
     prevAvgWeight,
     weightDelta,
-    command: getCoachCommand(weightDelta, avgReadiness || 0),
+    workoutCount,
+    plannedCount,
+    adherencePercent,
+    activePhase,
+  };
+  const coaching = getCoachCommand(baseSummary);
+
+  return {
+    ...baseSummary,
+    ...coaching,
   };
 }
 

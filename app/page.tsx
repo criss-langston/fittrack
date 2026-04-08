@@ -88,7 +88,7 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [readinessDraft, setReadinessDraft] = useState(readinessDefaults);
   const [todayReadinessScore, setTodayReadinessScore] = useState<number | null>(null);
-  const [coachSummary, setCoachSummary] = useState<{ avgReadiness: number; avgWeight: number; weightDelta: number; avgCalories: number; command: string } | null>(null);
+  const [coachSummary, setCoachSummary] = useState<Awaited<ReturnType<typeof getWeeklyReadinessSummary>> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -138,13 +138,7 @@ export default function DashboardPage() {
           setTodayReadinessScore(null);
         }
 
-        setCoachSummary({
-          avgReadiness: weeklySummary.avgReadiness,
-          avgWeight: weeklySummary.avgWeight,
-          weightDelta: weeklySummary.weightDelta,
-          avgCalories: weeklySummary.avgCalories,
-          command: weeklySummary.command,
-        });
+        setCoachSummary(weeklySummary);
       } catch (err) {
         console.error("Failed to load dashboard data:", err);
         if (!cancelled) setError("Failed to load data. Please refresh the page.");
@@ -204,13 +198,7 @@ export default function DashboardPage() {
     });
     setTodayReadinessScore(liveReadinessScore);
     const weeklySummary = await getWeeklyReadinessSummary();
-    setCoachSummary({
-      avgReadiness: weeklySummary.avgReadiness,
-      avgWeight: weeklySummary.avgWeight,
-      weightDelta: weeklySummary.weightDelta,
-      avgCalories: weeklySummary.avgCalories,
-      command: weeklySummary.command,
-    });
+    setCoachSummary(weeklySummary);
     showToast("Readiness check-in saved.", "success");
   };
 
@@ -348,9 +336,23 @@ export default function DashboardPage() {
             <div className="rounded-lg bg-gray-900/60 px-3 py-3"><p className="text-xs text-gray-500">Avg weight</p><p className="text-xl font-bold">{coachSummary.avgWeight ? coachSummary.avgWeight.toFixed(1) : "—"}</p></div>
             <div className="rounded-lg bg-gray-900/60 px-3 py-3"><p className="text-xs text-gray-500">Weight delta</p><p className="text-xl font-bold">{coachSummary.weightDelta > 0 ? '+' : ''}{coachSummary.weightDelta || 0}</p></div>
           </div>
-          <div className="rounded-xl border border-violet-500/20 bg-violet-500/10 px-4 py-3">
+          <div className="grid grid-cols-2 gap-3 mb-3 text-sm">
+            <div className="rounded-lg bg-gray-900/60 px-3 py-3"><p className="text-xs text-gray-500">Phase</p><p className="text-base font-semibold">{coachSummary.activePhase?.name || 'No active phase'}</p></div>
+            <div className="rounded-lg bg-gray-900/60 px-3 py-3"><p className="text-xs text-gray-500">Confidence</p><p className="text-base font-semibold capitalize">{coachSummary.confidence}</p></div>
+            <div className="rounded-lg bg-gray-900/60 px-3 py-3"><p className="text-xs text-gray-500">Workout count</p><p className="text-base font-semibold">{coachSummary.workoutCount}</p></div>
+            <div className="rounded-lg bg-gray-900/60 px-3 py-3"><p className="text-xs text-gray-500">Adherence</p><p className="text-base font-semibold">{coachSummary.adherencePercent}%</p></div>
+          </div>
+          <div className="rounded-xl border border-violet-500/20 bg-violet-500/10 px-4 py-3 mb-3">
             <p className="text-xs text-violet-200/80 mb-1">Coach command</p>
             <p className="font-semibold text-violet-100">{coachSummary.command}</p>
+          </div>
+          <div className="rounded-xl border border-gray-800 bg-gray-900/60 px-4 py-3 mb-3">
+            <p className="text-xs text-gray-400 mb-2">Why</p>
+            <ul className="space-y-1 text-sm text-gray-300 list-disc pl-4">{coachSummary.why.map((item, idx) => <li key={idx}>{item}</li>)}</ul>
+          </div>
+          <div className="rounded-xl border border-gray-800 bg-gray-900/60 px-4 py-3">
+            <p className="text-xs text-gray-400 mb-2">Actions</p>
+            <ul className="space-y-1 text-sm text-gray-300 list-disc pl-4">{coachSummary.actions.map((item, idx) => <li key={idx}>{item}</li>)}</ul>
           </div>
         </div>
       )}
