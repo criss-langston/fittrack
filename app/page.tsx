@@ -227,7 +227,7 @@ export default function DashboardPage() {
       <div className="mb-6">
         <p className="text-sm text-gray-500 mb-1">{greeting()}</p>
         <div className="flex items-center justify-between">
-          <h1 className="text-3xl font-bold">FitTrack</h1>
+          <h1 className="text-3xl font-bold">GainsVault</h1>
           <Link
             href="/settings"
             className="w-9 h-9 rounded-xl bg-gray-800 flex items-center justify-center hover:bg-gray-700 transition-colors touch-active"

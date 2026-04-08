@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { addPhase, getPhases, deletePhase, generateId, updatePhase, type FitnessPhase, type PhaseType } from "@/lib/db";
+import { addPhase, getPhases, deletePhase, generateId, updatePhase, getRecurringWorkoutPlans, materializeRecurringWorkoutsForDate, type FitnessPhase, type PhaseType, type RecurringWorkoutPlan } from "@/lib/db";
 import { useToast } from "@/app/providers";
-import { ChevronLeft, ChevronRight, Calendar as CalIcon, Plus, Trash2, X, Pencil, GitBranch } from "lucide-react";
+import { ChevronLeft, ChevronRight, Calendar as CalIcon, CalendarDays, Plus, Trash2, X, Pencil, GitBranch } from "lucide-react";
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -37,6 +37,7 @@ export default function CalendarPage() {
   const [currentYear, setCurrentYear] = useState(now.getFullYear());
   const [currentMonth, setCurrentMonth] = useState(now.getMonth());
   const [phases, setPhases] = useState<FitnessPhase[]>([]);
+  const [recurringPlans, setRecurringPlans] = useState<RecurringWorkoutPlan[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState<string>(getTodayISO());
   const [showForm, setShowForm] = useState(false);
@@ -52,8 +53,16 @@ export default function CalendarPage() {
     description: ''
   });
 
-  const loadPhases = async () => { setLoading(true); setPhases(await getPhases()); setLoading(false); };
-  useEffect(() => { loadPhases(); }, []);
+  const loadCalendarData = async () => {
+    setLoading(true);
+    const todayIso = getTodayISO();
+    await materializeRecurringWorkoutsForDate(todayIso);
+    const [phaseData, recurringData] = await Promise.all([getPhases(), getRecurringWorkoutPlans()]);
+    setPhases(phaseData);
+    setRecurringPlans(recurringData);
+    setLoading(false);
+  };
+  useEffect(() => { loadCalendarData(); }, []);
 
   const daysInMonth = getDaysInMonth(currentYear, currentMonth);
   const firstDay = getFirstDayOfMonth(currentYear, currentMonth);
@@ -81,7 +90,7 @@ export default function CalendarPage() {
   const selectedPhases = phases.filter((phase) => isPhaseOnDate(phase, selectedDate));
   const monthPhases = phases.filter((phase) => overlapsMonth(phase, currentYear, currentMonth));
   const phaseMap = new Map(phases.map((phase) => [phase.id, phase]));
-  const parentPhaseOptions = phases.filter((phase) => phase.type === 'bulk' && phase.id !== editingPhaseId);
+  const parentPhaseOptions = phases.filter((phase) => (phase.type === 'bulk' || phase.type === 'cut') && phase.id !== editingPhaseId);
 
   const openCreate = () => {
     setEditingPhaseId(null);
@@ -126,8 +135,8 @@ export default function CalendarPage() {
         showToast("Choose a valid parent bulk phase.", "error");
         return;
       }
-      if (parentPhase.type !== 'bulk') {
-        showToast("Mini cuts can only be attached to a bulking phase.", "error");
+      if (parentPhase.type !== 'bulk' && parentPhase.type !== 'cut') {
+        showToast("Sub-phases can only be attached to a bulking or cutting phase.", "error");
         return;
       }
       if (draft.type !== 'cut') {
@@ -161,13 +170,13 @@ export default function CalendarPage() {
     setEditingPhaseId(null);
     setUseDurationMode(false);
     setDraft({ name: '', type: 'maintenance', startDate: selectedDate, endDate: selectedDate, durationDays: 1, parentPhaseId: '', description: '' });
-    await loadPhases();
+    await loadCalendarData();
   };
 
   const confirmDeletePhase = async (id: string) => {
     if (confirm('Delete this phase?')) {
       await deletePhase(id);
-      await loadPhases();
+      await loadCalendarData();
       showToast('Phase deleted.', 'success');
     }
   };
@@ -225,6 +234,10 @@ export default function CalendarPage() {
             <div className="flex items-center gap-2 mb-3"><CalIcon size={16} className="text-violet-400" /><h3 className="text-sm font-semibold">Selected date</h3></div>
             <p className="text-sm text-gray-400 mb-3">{new Date(selectedDate + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p>
             {selectedPhases.length === 0 ? <p className="text-sm text-gray-500">No phase assigned to this day.</p> : <div className="space-y-2">{selectedPhases.map((phase) => { const parent = phase.parentPhaseId ? phaseMap.get(phase.parentPhaseId) : null; return <div key={phase.id} className={`rounded-xl border p-3 ${PHASE_COLORS[phase.type]}`}><div className="flex items-start justify-between gap-3"><div><p className="font-semibold">{phase.name}</p><p className="text-xs opacity-80">{phase.startDate} → {phase.endDate}</p>{parent && <p className="text-xs opacity-80 mt-1 flex items-center gap-1"><GitBranch size={12} /> Part of {parent.name}</p>}{phase.description && <p className="mt-1 text-xs opacity-80">{phase.description}</p>}</div><div className="flex items-center gap-2"><button onClick={() => openEdit(phase)} className="opacity-70 hover:opacity-100"><Pencil size={14} /></button><button onClick={() => confirmDeletePhase(phase.id)} className="opacity-70 hover:opacity-100"><Trash2 size={14} /></button></div></div></div>; })}</div>}
+            <div className="mt-4 border-t border-gray-800 pt-3">
+              <div className="flex items-center gap-2 mb-2"><CalendarDays size={16} className="text-cyan-400" /><h3 className="text-sm font-semibold">Scheduled recurring workouts</h3></div>
+              {recurringPlans.filter((plan) => plan.isActive && (!plan.endDate || plan.endDate >= selectedDate) && plan.startDate <= selectedDate && plan.weekdays.includes(new Date(selectedDate + 'T12:00:00').getDay())).length === 0 ? <p className="text-sm text-gray-500">No recurring workouts scheduled for this day.</p> : <div className="space-y-2">{recurringPlans.filter((plan) => plan.isActive && (!plan.endDate || plan.endDate >= selectedDate) && plan.startDate <= selectedDate && plan.weekdays.includes(new Date(selectedDate + 'T12:00:00').getDay())).map((plan) => <div key={plan.id} className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-3"><p className="font-medium text-cyan-100">{plan.name}</p><p className="text-xs text-cyan-200/80 mt-1">Repeats on {plan.weekdays.map((day) => ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][day]).join(' • ')}</p></div>)}</div>}
+            </div>
           </div>
 
           <div className="card">

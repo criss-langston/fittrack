@@ -6,7 +6,7 @@ import { Home, Dumbbell, Calendar, Utensils, Ruler } from "lucide-react";
 
 const tabs = [
   { href: "/", label: "Home", icon: Home },
-  { href: "/workouts", label: "Workouts", icon: Dumbbell },
+  { href: "/workouts", label: "Training", icon: Dumbbell },
   { href: "/nutrition", label: "Nutrition", icon: Utensils },
   { href: "/calendar", label: "Calendar", icon: Calendar },
   { href: "/measurements", label: "Measure", icon: Ruler },

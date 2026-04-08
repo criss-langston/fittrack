@@ -9,13 +9,13 @@ import { Providers } from "@/app/providers";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "FitTrack",
-  description: "A mobile-first, device-local fitness tracker",
+  title: "GainsVault",
+  description: "A mobile-first, device-local strength and body progress tracker",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "FitTrack",
+    title: "GainsVault",
   },
 };
 

@@ -120,6 +120,8 @@ export interface Workout {
   notes?: string;
   rpe?: number;
   programId?: string;
+  recurringPlanId?: string;
+  scheduledFor?: string;
   supersets?: { exerciseIndices: number[] }[];
 }
 
@@ -129,6 +131,20 @@ export interface WorkoutTemplate {
   description?: string;
   exercises: { name: string; sets: number; reps: number }[];
   createdAt: string;
+}
+
+export interface RecurringWorkoutPlan {
+  id: string;
+  name: string;
+  templateId?: string;
+  exerciseNames: string[];
+  weekdays: number[]; // 0=Sun ... 6=Sat
+  startDate: string;
+  endDate?: string;
+  notes?: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface Measurement {
@@ -214,13 +230,14 @@ export function getProgressiveOverloadSuggestion(history: { date: string; sets: 
 }
 
 interface FitTrackDB extends DBSchema {
-  workouts: { key: string; value: Workout; indexes: { 'by-date': string } };
+  workouts: { key: string; value: Workout; indexes: { 'by-date': string; 'by-scheduledFor': string } };
   weightLog: { key: string; value: { id: string; date: string; weight: number; calories?: number; notes?: string }; indexes: { 'by-date': string } };
   photos: { key: string; value: { id: string; date: string; dataUrl: string; caption?: string; milestone?: string }; indexes: { 'by-date': string } };
   programs: { key: string; value: { id: string; name: string; description?: string; days: { name: string; exercises: { name: string; sets: number; reps: string; restSeconds?: number }[] }[]; isActive: boolean; createdAt: string } };
   personalRecords: { key: string; value: { id: string; exercise: string; weight: number; reps: number; date: string }; indexes: { 'by-exercise': string } };
   customExercises: { key: string; value: { id: string; name: string; category: 'machine' | 'cable' | 'barbell' | 'dumbbell' | 'bodyweight' | 'other'; muscleGroup: string; specificMuscles?: string[]; notes?: string; createdAt: string }; indexes: { 'by-category': string; 'by-muscle': string } };
   workoutTemplates: { key: string; value: WorkoutTemplate };
+  recurringWorkoutPlans: { key: string; value: RecurringWorkoutPlan; indexes: { 'by-startDate': string; 'by-active': number } };
   measurements: { key: string; value: Measurement; indexes: { 'by-date': string } };
   meals: { key: string; value: Meal; indexes: { 'by-date': string; 'by-mealType': string } };
   macroLogs: { key: string; value: MacroLog; indexes: { 'by-date': string } };
@@ -234,7 +251,7 @@ let dbPromise: Promise<IDBPDatabase<FitTrackDB>> | null = null;
 
 export function getDB(): Promise<IDBPDatabase<FitTrackDB>> {
   if (!dbPromise) {
-    dbPromise = openDB<FitTrackDB>('fittrack', 11, {
+    dbPromise = openDB<FitTrackDB>('fittrack', 12, {
       upgrade(db, oldVersion) {
         if (oldVersion < 1) {
           const workoutStore = db.createObjectStore('workouts', { keyPath: 'id' });
@@ -278,6 +295,11 @@ export function getDB(): Promise<IDBPDatabase<FitTrackDB>> {
           const readinessStore = db.createObjectStore('readinessLogs', { keyPath: 'id' });
           readinessStore.createIndex('by-date', 'date');
         }
+        if (oldVersion < 12) {
+          const recurringStore = db.createObjectStore('recurringWorkoutPlans', { keyPath: 'id' });
+          recurringStore.createIndex('by-startDate', 'startDate');
+          recurringStore.createIndex('by-active', 'isActive');
+        }
         if (oldVersion < 7) {
           const userProfileStore = db.createObjectStore('userProfile', { keyPath: 'id' });
           userProfileStore.createIndex('by-lastUpdated', 'lastUpdated');
@@ -302,9 +324,18 @@ export function getDB(): Promise<IDBPDatabase<FitTrackDB>> {
   return dbPromise;
 }
 
+export async function ensureWorkoutIndexes() {
+  const db = await getDB();
+  return db;
+}
+
 export async function addWorkout(workout: Workout) { const db = await getDB(); await db.put('workouts', workout); }
 export async function getWorkouts(limit?: number): Promise<Workout[]> { const db = await getDB(); const all = await db.getAllFromIndex('workouts', 'by-date'); const sorted = all.reverse(); return limit ? sorted.slice(0, limit) : sorted; }
 export async function deleteWorkout(id: string) { const db = await getDB(); await db.delete('workouts', id); }
+export async function getScheduledWorkoutsForDate(date: string): Promise<Workout[]> {
+  const workouts = await getWorkouts();
+  return workouts.filter((workout) => workout.scheduledFor === date);
+}
 
 export async function addWeightEntry(entry: FitTrackDB['weightLog']['value']) { const db = await getDB(); await db.put('weightLog', entry); }
 export async function getWeightEntries(limit?: number) { const db = await getDB(); const all = await db.getAllFromIndex('weightLog', 'by-date'); const sorted = all.reverse(); return limit ? sorted.slice(0, limit) : sorted; }
@@ -340,6 +371,63 @@ export async function getAllExerciseNames(): Promise<string[]> {
 export async function addWorkoutTemplate(template: WorkoutTemplate) { const db = await getDB(); await db.put('workoutTemplates', template); }
 export async function getWorkoutTemplates(): Promise<WorkoutTemplate[]> { const db = await getDB(); return db.getAll('workoutTemplates'); }
 export async function deleteWorkoutTemplate(id: string) { const db = await getDB(); await db.delete('workoutTemplates', id); }
+
+export async function addRecurringWorkoutPlan(plan: RecurringWorkoutPlan) { const db = await getDB(); await db.put('recurringWorkoutPlans', plan); }
+export async function getRecurringWorkoutPlans(): Promise<RecurringWorkoutPlan[]> { const db = await getDB(); const all = await db.getAll('recurringWorkoutPlans'); return all.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)); }
+export async function updateRecurringWorkoutPlan(id: string, updates: Partial<RecurringWorkoutPlan>) {
+  const db = await getDB();
+  const current = await db.get('recurringWorkoutPlans', id);
+  if (!current) return null;
+  const updated = { ...current, ...updates, id, updatedAt: new Date().toISOString() };
+  await db.put('recurringWorkoutPlans', updated);
+  return updated;
+}
+export async function deleteRecurringWorkoutPlan(id: string) { const db = await getDB(); await db.delete('recurringWorkoutPlans', id); }
+
+export function isRecurringWorkoutDue(plan: RecurringWorkoutPlan, date: string) {
+  if (!plan.isActive) return false;
+  if (date < plan.startDate) return false;
+  if (plan.endDate && date > plan.endDate) return false;
+  const day = new Date(date + 'T12:00:00').getDay();
+  return plan.weekdays.includes(day);
+}
+
+export async function getDueRecurringWorkoutPlans(date: string) {
+  const plans = await getRecurringWorkoutPlans();
+  return plans.filter((plan) => isRecurringWorkoutDue(plan, date));
+}
+
+export async function scheduleRecurringWorkout(planId: string, date: string) {
+  const db = await getDB();
+  const plan = await db.get('recurringWorkoutPlans', planId);
+  if (!plan) return null;
+  const existing = (await getWorkouts()).find((w) => w.recurringPlanId === planId && w.scheduledFor === date);
+  if (existing) return existing;
+  const template = plan.templateId ? await db.get('workoutTemplates', plan.templateId) : null;
+  const exercises = template
+    ? template.exercises.map((exercise) => ({ name: exercise.name, sets: Array.from({ length: exercise.sets }, () => ({ reps: exercise.reps, weight: 0, completed: true })) }))
+    : plan.exerciseNames.map((name) => ({ name, sets: [{ reps: 10, weight: 0, completed: true }] }));
+  const workout: Workout = {
+    id: generateId(),
+    date: `${date}T06:00:00.000Z`,
+    scheduledFor: date,
+    recurringPlanId: plan.id,
+    exercises,
+    notes: plan.notes,
+  };
+  await db.put('workouts', workout);
+  return workout;
+}
+
+export async function materializeRecurringWorkoutsForDate(date: string) {
+  const duePlans = await getDueRecurringWorkoutPlans(date);
+  const created: Workout[] = [];
+  for (const plan of duePlans) {
+    const workout = await scheduleRecurringWorkout(plan.id, date);
+    if (workout) created.push(workout);
+  }
+  return created;
+}
 
 export async function addMeasurement(measurement: Measurement) { const db = await getDB(); await db.put('measurements', measurement); }
 export async function getMeasurements(limit?: number): Promise<Measurement[]> { const db = await getDB(); const all = await db.getAllFromIndex('measurements', 'by-date'); const sorted = all.reverse(); return limit ? sorted.slice(0, limit) : sorted; }
@@ -459,7 +547,7 @@ export async function getExerciseHistory(exerciseName: string, limit: number): P
   return results;
 }
 
-const STORE_NAMES = ['workouts', 'weightLog', 'photos', 'programs', 'personalRecords', 'customExercises', 'workoutTemplates', 'measurements', 'macroLogs', 'readinessLogs', 'userProfile', 'phases'] as const;
+const STORE_NAMES = ['workouts', 'weightLog', 'photos', 'programs', 'personalRecords', 'customExercises', 'workoutTemplates', 'recurringWorkoutPlans', 'measurements', 'macroLogs', 'readinessLogs', 'userProfile', 'phases'] as const;
 type StoreName = typeof STORE_NAMES[number];
 
 export interface FitTrackBackup {
@@ -472,11 +560,11 @@ export async function exportAllData(): Promise<FitTrackBackup> {
   const data: Record<string, unknown[]> = {};
   const storeCount: Record<string, number> = {};
   for (const store of STORE_NAMES) {
-    const items = await db.getAll(store);
+    const items = await db.getAll(store as StoreName);
     data[store] = items;
     storeCount[store] = items.length;
   }
-  return { metadata: { exportDate: new Date().toISOString(), appVersion: '0.1.0', storeCount }, data };
+  return { metadata: { exportDate: new Date().toISOString(), appVersion: '0.1.0', storeCount: storeCount as Record<StoreName, number> }, data: data as Record<StoreName, unknown[]> };
 }
 
 export function validateBackup(json: unknown): json is FitTrackBackup {
@@ -496,7 +584,7 @@ export async function importAllData(backup: FitTrackBackup): Promise<{ imported:
   const db = await getDB();
   const imported: Record<string, number> = {};
   for (const store of STORE_NAMES) {
-    const tx = db.transaction(store, 'readwrite');
+    const tx = db.transaction(store as StoreName, 'readwrite');
     await tx.store.clear();
     const items = backup.data[store];
     if (items && Array.isArray(items)) {
@@ -505,7 +593,7 @@ export async function importAllData(backup: FitTrackBackup): Promise<{ imported:
     } else imported[store] = 0;
     await tx.done;
   }
-  return { imported } as { imported: Record<StoreName, number> };
+  return { imported: imported as Record<StoreName, number> };
 }
 
 export function exportWorkoutsToCSV(workouts: Workout[]): string {
@@ -552,7 +640,7 @@ export async function getStorageStats(): Promise<StoreStats[]> {
   const db = await getDB();
   const stats: StoreStats[] = [];
   for (const store of STORE_NAMES) {
-    const items = await db.getAll(store);
+    const items = await db.getAll(store as StoreName);
     let size = 0;
     for (const item of items) { try { size += JSON.stringify(item).length; } catch {} }
     stats.push({ store, count: items.length, sizeBytes: size });
@@ -562,7 +650,7 @@ export async function getStorageStats(): Promise<StoreStats[]> {
 
 export async function clearAllData(): Promise<void> {
   const db = await getDB();
-  for (const store of STORE_NAMES) { const tx = db.transaction(store, 'readwrite'); await tx.store.clear(); await tx.done; }
+  for (const store of STORE_NAMES) { const tx = db.transaction(store as StoreName, 'readwrite'); await tx.store.clear(); await tx.done; }
 }
 
 export async function cleanupOldData(options: { workoutsOlderThanDays?: number; keepLastNMeasurements?: number; deletePhotosOlderThanDays?: number }): Promise<{ deleted: Record<string, number> }> {
