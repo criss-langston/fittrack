@@ -350,9 +350,13 @@ export default function DashboardPage() {
             <p className="text-xs text-gray-400 mb-2">Why</p>
             <ul className="space-y-1 text-sm text-gray-300 list-disc pl-4">{coachSummary.why.map((item, idx) => <li key={idx}>{item}</li>)}</ul>
           </div>
-          <div className="rounded-xl border border-gray-800 bg-gray-900/60 px-4 py-3">
+          <div className="rounded-xl border border-gray-800 bg-gray-900/60 px-4 py-3 mb-3">
             <p className="text-xs text-gray-400 mb-2">Actions</p>
             <ul className="space-y-1 text-sm text-gray-300 list-disc pl-4">{coachSummary.actions.map((item, idx) => <li key={idx}>{item}</li>)}</ul>
+          </div>
+          <div className="rounded-xl border border-gray-800 bg-gray-900/60 px-4 py-3">
+            <p className="text-xs text-gray-400 mb-2">Coach History</p>
+            <div className="space-y-2">{coachSummary.history.length === 0 ? <p className="text-sm text-gray-500">Not enough history yet.</p> : coachSummary.history.map((entry, idx) => <div key={idx} className="rounded-lg bg-gray-800/70 px-3 py-2"><div className="flex items-center justify-between gap-3"><div><p className="text-sm font-medium text-gray-200">{entry.command}</p><p className="text-xs text-gray-500">{entry.phaseName} · {entry.weekStart} → {entry.weekEnd}</p></div><div className="text-right"><p className="text-xs text-gray-400">Readiness {entry.avgReadiness || '—'}</p><p className="text-xs text-gray-400">Δ {entry.weightDelta > 0 ? '+' : ''}{entry.weightDelta}</p></div></div></div>)}</div>
           </div>
         </div>
       )}

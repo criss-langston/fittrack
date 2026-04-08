@@ -451,6 +451,16 @@ export async function getRecentReadinessLogs(limit: number): Promise<ReadinessLo
 export async function getRecentMacroLogs(limit: number): Promise<MacroLog[]> { const logs = await getMacroLogs(); return logs.slice(0, limit); }
 export async function deleteReadinessLog(id: string) { const db = await getDB(); await db.delete('readinessLogs', id); }
 
+export interface CoachHistoryEntry {
+  weekStart: string;
+  weekEnd: string;
+  phaseName: string;
+  command: string;
+  confidence: 'low' | 'medium' | 'high';
+  weightDelta: number;
+  avgReadiness: number;
+}
+
 export interface CoachSummary {
   currentWeek: ReadinessLog[];
   previousWeek: ReadinessLog[];
@@ -470,6 +480,7 @@ export interface CoachSummary {
   why: string[];
   actions: string[];
   confidence: 'low' | 'medium' | 'high';
+  history: CoachHistoryEntry[];
 }
 
 function getActivePhaseForDate(phases: FitnessPhase[], date: string) {
@@ -487,6 +498,10 @@ function getPhaseWeightTargetRange(phaseType?: PhaseType | null) {
 
 type CoachInput = Pick<CoachSummary, 'currentWeek' | 'previousWeek' | 'avgReadiness' | 'previousAvgReadiness' | 'avgCalories' | 'calorieTarget' | 'calorieDelta' | 'avgWeight' | 'prevAvgWeight' | 'weightDelta' | 'workoutCount' | 'plannedCount' | 'adherencePercent' | 'activePhase'>;
 
+function isMiniCutPhase(phase: FitnessPhase | null) {
+  return !!phase && phase.type === 'cut' && !!phase.parentPhaseId;
+}
+
 export function getCoachCommand(summary: CoachInput) {
   const phaseType = summary.activePhase?.type || 'maintenance';
   const target = getPhaseWeightTargetRange(phaseType);
@@ -503,6 +518,21 @@ export function getCoachCommand(summary: CoachInput) {
     command = 'Recover first';
     why.push('readiness is low or trending down');
     actions.push('prioritize sleep and reduce training volume slightly this week');
+  } else if (isMiniCutPhase(summary.activePhase)) {
+    if (summary.weightDelta > -0.3) {
+      command = 'Tighten the mini cut';
+      why.push('mini cut is not driving enough short-term weight loss');
+      if (summary.calorieDelta > 0) why.push('average calories are above target during the mini cut');
+      actions.push('reduce calories by 150–200 and keep training intensity high');
+    } else if (summary.avgReadiness < 7) {
+      command = 'Protect performance during the mini cut';
+      why.push('fat loss is happening but readiness is slipping');
+      actions.push('hold calories steady for now and reduce fatigue where possible');
+    } else {
+      command = 'Mini cut is on track';
+      why.push('short-term fat loss is moving while recovery remains acceptable');
+      actions.push('keep protein high and maintain lifting performance');
+    }
   } else if (phaseType === 'bulk') {
     if (summary.weightDelta < target.min) {
       command = 'Increase calories slightly';
@@ -606,9 +636,51 @@ export async function getWeeklyReadinessSummary(): Promise<CoachSummary> {
   };
   const coaching = getCoachCommand(baseSummary);
 
+  const history: CoachHistoryEntry[] = [0, 1, 2, 3].map((weekIndex) => {
+    const start = weekIndex * 7;
+    const end = start + 7;
+    const weekLogs = logs.slice(start, end);
+    const weekWeights = weights.slice(start, end).map((w) => Number(w.weight)).filter(Boolean);
+    const prevWeights = weights.slice(end, end + 7).map((w) => Number(w.weight)).filter(Boolean);
+    const weekAvgReadiness = Math.round(average(weekLogs.map(getReadinessScore)));
+    const weekAvgWeight = average(weekWeights);
+    const prevWeekAvgWeight = average(prevWeights);
+    const weekWeightDelta = weekAvgWeight && prevWeekAvgWeight ? Number((weekAvgWeight - prevWeekAvgWeight).toFixed(1)) : 0;
+    const phaseForWeek = getActivePhaseForDate(phases, logs[start]?.date || today);
+    const historyInput: CoachInput = {
+      currentWeek: weekLogs,
+      previousWeek: logs.slice(end, end + 7),
+      avgReadiness: weekAvgReadiness,
+      previousAvgReadiness: Math.round(average(logs.slice(end, end + 7).map(getReadinessScore))),
+      avgCalories,
+      calorieTarget,
+      calorieDelta,
+      avgWeight: weekAvgWeight,
+      prevAvgWeight: prevWeekAvgWeight,
+      weightDelta: weekWeightDelta,
+      workoutCount,
+      plannedCount,
+      adherencePercent,
+      activePhase: phaseForWeek,
+    };
+    const historyCoach = getCoachCommand(historyInput);
+    const weekStart = logs[end - 1]?.date || today;
+    const weekEnd = logs[start]?.date || today;
+    return {
+      weekStart,
+      weekEnd,
+      phaseName: phaseForWeek?.name || 'No phase',
+      command: historyCoach.command,
+      confidence: historyCoach.confidence,
+      weightDelta: weekWeightDelta,
+      avgReadiness: weekAvgReadiness,
+    };
+  }).filter((entry) => entry.weekStart && entry.weekEnd);
+
   return {
     ...baseSummary,
     ...coaching,
+    history,
   };
 }
 
